@@ -434,6 +434,27 @@ main {
     gap: 6px;
 }
 
+.service-list {
+    display: grid;
+    gap: 10px;
+}
+
+.service-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 12px;
+}
+
+.service-row.is-excluded {
+    opacity: 0.6;
+    background: rgba(12, 60, 120, 0.04);
+}
+
 .analysis-list,
 .analysis-warnings,
 .estimate-output ul {

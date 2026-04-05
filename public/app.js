@@ -52,12 +52,14 @@ function roundCurrency(value) {
     return Math.round(value * 100) / 100;
 }
 
-function normalizeLineItems(items) {
+function normalizeLineItems(items, prefix) {
     const lineItems = Array.isArray(items) ? items : [];
-    return lineItems.map((item) => {
+    const safePrefix = prefix || "estimate";
+    return lineItems.map((item, index) => {
         const fallbackTotal = Number(item.material || 0) + Number(item.labor || 0);
         return {
             ...item,
+            rowId: item.rowId || `${safePrefix}-${index}`,
             description: item.description || "Line item",
             total: normalizeAmount(item.total || fallbackTotal),
             material: Number.isFinite(Number(item.material)) ? Number(item.material) : 0,
@@ -69,6 +71,14 @@ function normalizeLineItems(items) {
 
 function sumLineItems(items) {
     return items.reduce((sum, item) => sum + normalizeAmount(item.total), 0);
+}
+
+function applyExclusions(items, excludedIds) {
+    if (!excludedIds || !excludedIds.length) {
+        return items;
+    }
+    const excludedSet = new Set(excludedIds);
+    return items.filter((item) => !excludedSet.has(item.rowId));
 }
 
 function scaleLineItems(items, scale, targetSubtotal) {
@@ -109,16 +119,23 @@ function calculateTotals(estimate) {
 }
 
 function normalizeEstimate(estimate) {
-    const baseLineItems = normalizeLineItems(estimate.baseLineItems || estimate.lineItems || []);
+    const baseLineItems = normalizeLineItems(
+        estimate.baseLineItems || estimate.lineItems || [],
+        estimate.estimateId
+    );
+    const excludedRowIds = Array.isArray(estimate.excludedRowIds)
+        ? estimate.excludedRowIds
+        : [];
+    const includedLineItems = applyExclusions(baseLineItems, excludedRowIds);
     const customTotal = normalizeAmount(estimate.customTotal);
     const taxRate = Number(estimate.taxRate || 0);
-    let adjustedLineItems = baseLineItems;
+    let adjustedLineItems = includedLineItems;
 
     if (customTotal > 0) {
         const targetSubtotal = roundCurrency(customTotal / (1 + taxRate));
-        const baseSubtotal = sumLineItems(baseLineItems);
+        const baseSubtotal = sumLineItems(includedLineItems);
         const scale = baseSubtotal > 0 ? targetSubtotal / baseSubtotal : 1;
-        adjustedLineItems = scaleLineItems(baseLineItems, scale, targetSubtotal);
+        adjustedLineItems = scaleLineItems(includedLineItems, scale, targetSubtotal);
     }
 
     const criticalItems = adjustedLineItems.filter((item) => item.critical);
@@ -134,6 +151,7 @@ function normalizeEstimate(estimate) {
     return {
         ...estimate,
         baseLineItems,
+        excludedRowIds,
         lineItems: adjustedLineItems,
         criticalItems,
         additionalItems,
@@ -342,10 +360,16 @@ function renderEstimate(estimate) {
         : currentEstimate && currentEstimate.baseLineItems
             ? currentEstimate.baseLineItems
             : estimate.lineItems;
+    const excludedRowIds = estimateIdChanged
+        ? []
+        : currentEstimate && Array.isArray(currentEstimate.excludedRowIds)
+            ? currentEstimate.excludedRowIds
+            : [];
 
     const baseEstimate = {
         ...estimate,
         baseLineItems,
+        excludedRowIds,
         customTotal: typeof estimate.customTotal !== "undefined"
             ? estimate.customTotal
             : currentEstimate && typeof currentEstimate.customTotal !== "undefined"
@@ -415,6 +439,32 @@ function renderEstimate(estimate) {
         const customTotalNote = currentEstimate.customTotal
             ? "<p class=\"muted\">Custom total applied. Line items adjusted proportionally.</p>"
             : "<p class=\"muted\">Optional. Adjusts the total and scales line items.</p>";
+        const serviceRows = currentEstimate.baseLineItems && currentEstimate.baseLineItems.length
+            ? currentEstimate.baseLineItems
+                .map((item) => {
+                    const rowId = item.rowId;
+                    const isExcluded = currentEstimate.excludedRowIds.includes(rowId);
+                    const label = isExcluded ? "Restore" : "Remove";
+                    const status = isExcluded ? "Excluded" : "Included";
+                    const rowClass = isExcluded ? "service-row is-excluded" : "service-row";
+                    return `
+                <div class="${rowClass}">
+                <div>
+                    <strong>${escapeHtml(item.description)}</strong>
+                    <div class="muted">${status}</div>
+                </div>
+                <button
+                    type="button"
+                    class="btn ghost small"
+                    data-toggle-row-id="${rowId}"
+                >
+                    ${label}
+                </button>
+                </div>
+            `;
+                })
+                .join("")
+            : "<p class=\"muted\">No services found.</p>";
 
         estimateResult.innerHTML = `
         <div class="output-header">
@@ -445,6 +495,13 @@ function renderEstimate(estimate) {
         </div>
         <div class="analysis-block">
             <h4>Total Adjustment</h4>
+            <div class="edit-field">
+                <label>Services</label>
+                <div class="service-list">
+                    ${serviceRows}
+                </div>
+                <p class="muted">Remove a service to exclude it from totals and the PDF.</p>
+            </div>
             <div class="edit-field">
                 <label for="customTotal">Custom Total (optional)</label>
                 <input
@@ -529,7 +586,27 @@ function handleEstimateChange(event) {
     }
 }
 
+function handleEstimateClick(event) {
+    if (!currentEstimate) return;
+    const toggleButton = event.target.closest("[data-toggle-row-id]");
+    if (!toggleButton) return;
+
+    const rowId = toggleButton.getAttribute("data-toggle-row-id");
+    if (!rowId) return;
+
+    const excluded = new Set(currentEstimate.excludedRowIds || []);
+    if (excluded.has(rowId)) {
+        excluded.delete(rowId);
+    } else {
+        excluded.add(rowId);
+    }
+
+    currentEstimate.excludedRowIds = Array.from(excluded);
+    renderEstimate(currentEstimate);
+}
+
 if (estimateResult) {
+    estimateResult.addEventListener("click", handleEstimateClick);
     estimateResult.addEventListener("change", handleEstimateChange);
 }
 
