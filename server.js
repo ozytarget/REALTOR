@@ -988,6 +988,9 @@ function generateEstimatePdf(estimate, res) {
     const headerWidth = 200;
     let headerHeight = 60;
     let textStartX = leftX;
+    const availableWidth = rightX - leftX;
+    const contentWidth = Math.min(480, availableWidth);
+    const centeredLeft = leftX + (availableWidth - contentWidth) / 2;
 
     if (fs.existsSync(LOGO_PATH)) {
         const logoWidth = 120;
@@ -995,8 +998,10 @@ function generateEstimatePdf(estimate, res) {
         doc.image(LOGO_PATH, leftX, headerTop, {
             fit: [logoWidth, logoHeight]
         });
-        textStartX = leftX + logoWidth + 12;
+        textStartX = Math.max(centeredLeft, leftX + logoWidth + 16);
         headerHeight = Math.max(headerHeight, logoHeight);
+    } else {
+        textStartX = centeredLeft;
     }
 
     doc.fontSize(18).text("Estimate", rightX - headerWidth, headerTop, {
@@ -1012,14 +1017,26 @@ function generateEstimatePdf(estimate, res) {
         align: "right"
     });
 
-    doc.fontSize(12).text(estimate.company || "A PRO HANDYMAN LLC", textStartX, headerTop);
+    doc.fontSize(12).text(estimate.company || "A PRO HANDYMAN LLC", textStartX, headerTop, {
+        width: contentWidth
+    });
     let companyTextY = headerTop + 16;
     if (estimate.contractor) {
-        doc.fontSize(10).text(`Contractor: ${estimate.contractor}`, textStartX, companyTextY);
+        doc.fontSize(10).text(`Contractor: ${estimate.contractor}`, textStartX, companyTextY, {
+            width: contentWidth
+        });
         companyTextY += 14;
     }
+    doc.fontSize(10).text("Cell: 678-725-8896", textStartX, companyTextY, {
+        width: contentWidth
+    });
+    companyTextY += 14;
+    doc.fontSize(10).text("Email: proservices911@aol.com", textStartX, companyTextY, {
+        width: contentWidth
+    });
+    companyTextY += 14;
 
-    const headerBottom = Math.max(headerTop + headerHeight, companyTextY + 4);
+    const headerBottom = Math.max(headerTop + headerHeight, companyTextY + 2);
     doc.y = headerBottom + 8;
     doc.moveTo(leftX, doc.y).lineTo(rightX, doc.y).strokeColor("#d9d9d9").stroke();
     doc.moveDown(0.6);
@@ -1030,50 +1047,86 @@ function generateEstimatePdf(estimate, res) {
             : "Address pending";
     const cityStateZip = formatCityStateZip(estimate.location || {});
 
-    doc.fontSize(11).text("Property Details");
-    doc.fontSize(10).text(`Property Address: ${propertyAddress}`);
+    const contentX = centeredLeft;
+    doc.fontSize(11).text("Property Details", contentX, doc.y, { width: contentWidth });
+    doc.fontSize(10).text(`Property Address: ${propertyAddress}`, contentX, doc.y, { width: contentWidth });
     if (cityStateZip) {
-        doc.fontSize(10).text(`City/State/Zip: ${cityStateZip}`);
+        doc.fontSize(10).text(`City/State/Zip: ${cityStateZip}`, contentX, doc.y, { width: contentWidth });
     }
-    doc.moveDown();
+    doc.moveDown(0.5);
 
-    renderPdfSection(doc, "Critical Repairs", estimate.criticalItems || []);
-    renderPdfSection(doc, "Additional Repairs", estimate.additionalItems || []);
+    renderPdfSection(doc, "Critical Repairs", estimate.criticalItems || [], {
+        x: contentX,
+        width: contentWidth
+    });
+    renderPdfSection(doc, "Additional Repairs", estimate.additionalItems || [], {
+        x: contentX,
+        width: contentWidth
+    });
 
     doc.moveDown();
-    doc.fontSize(12).text("Totals");
-    doc.fontSize(10).text(`Subtotal: ${formatCurrency(estimate.totals.subtotal)}`);
-    doc.fontSize(10).text(`Tax (${(estimate.taxRate * 100).toFixed(1)}%): ${formatCurrency(estimate.totals.tax)}`);
-    doc.fontSize(11).text(`Grand Total: ${formatCurrency(estimate.totals.total)}`);
+    doc.fontSize(12).text("Totals", contentX, doc.y, { width: contentWidth });
+    doc.fontSize(10).text(`Subtotal: ${formatCurrency(estimate.totals.subtotal)}`, contentX, doc.y, { width: contentWidth });
+    doc.fontSize(10).text(`Tax (${(estimate.taxRate * 100).toFixed(1)}%): ${formatCurrency(estimate.totals.tax)}`,
+        contentX,
+        doc.y,
+        { width: contentWidth }
+    );
+    doc.fontSize(11).text(`Grand Total: ${formatCurrency(estimate.totals.total)}`, contentX, doc.y, { width: contentWidth });
 
     if (estimate.analysis && estimate.analysis.summary) {
         doc.moveDown();
-        doc.fontSize(11).text("AI Findings");
-        doc.fontSize(9).text(estimate.analysis.summary);
+        doc.fontSize(11).text("AI Findings", contentX, doc.y, { width: contentWidth });
+        doc.fontSize(9).text(estimate.analysis.summary, contentX, doc.y, { width: contentWidth });
     }
 
     doc.end();
 }
 
-function renderPdfSection(doc, title, items) {
-    doc.fontSize(12).text(title, { underline: true });
+function renderPdfSection(doc, title, items, layout) {
+    const contentX = layout && typeof layout.x === "number" ? layout.x : doc.page.margins.left;
+    const contentWidth = layout && typeof layout.width === "number"
+        ? layout.width
+        : doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const amountWidth = 90;
+    const descriptionWidth = Math.max(120, contentWidth - amountWidth - 10);
+
+    doc.fontSize(12).text(title, contentX, doc.y, { underline: true, width: contentWidth });
 
     if (!items.length) {
-        doc.fontSize(9).text("None listed.");
+        doc.fontSize(9).text("None listed.", contentX, doc.y, { width: contentWidth });
         doc.moveDown(0.5);
         return;
     }
 
     items.forEach((item) => {
-        doc.fontSize(10).text(item.description, { continued: true });
-        doc.fontSize(10).text(formatCurrency(item.total), { align: "right" });
+        const startY = doc.y;
+        const description = String(item.description || "");
+        const descriptionHeight = doc.heightOfString(description, {
+            width: descriptionWidth
+        });
+
+        doc.fontSize(10).text(description, contentX, startY, {
+            width: descriptionWidth
+        });
+        doc.fontSize(10).text(formatCurrency(item.total), contentX + descriptionWidth, startY, {
+            width: amountWidth,
+            align: "right"
+        });
+
+        doc.y = startY + descriptionHeight;
+
         if (item.notes) {
-            doc.fontSize(8).text(item.notes);
+            doc.fontSize(8).text(item.notes, contentX, doc.y, {
+                width: descriptionWidth
+            });
         }
         if (Array.isArray(item.parts) && item.parts.length > 0) {
-            doc.fontSize(8).text(`Parts: ${item.parts.join(", ")}`);
+            doc.fontSize(8).text(`Parts: ${item.parts.join(", ")}`, contentX, doc.y, {
+                width: descriptionWidth
+            });
         }
-        doc.moveDown(0.3);
+        doc.moveDown(0.4);
     });
 }
 
