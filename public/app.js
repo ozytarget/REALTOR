@@ -12,6 +12,8 @@ const reportIdInput = document.getElementById("reportId");
 let currentEstimate = null;
 let isEditMode = false;
 let selectedReportFile = null;
+const MAX_UPLOAD_MB = 50;
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -164,6 +166,11 @@ if (uploadForm) {
     const file = (reportFile && reportFile.files && reportFile.files[0]) || selectedReportFile;
     if (!file) {
         uploadStatus.textContent = "Select a PDF file to upload.";
+        return;
+    }
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+        uploadStatus.textContent = `File too large. Max ${MAX_UPLOAD_MB}MB.`;
         return;
     }
 
