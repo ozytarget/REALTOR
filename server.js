@@ -342,16 +342,10 @@ async function buildEstimate(payload, sessionDir) {
     const total = subtotal + tax;
 
     const assumptions = [
-        "Material pricing uses regional Home Depot retail averages (placeholder).",
-        "Labor pricing uses regional average contractor rates.",
-        "Final scope and pricing confirmed after onsite review."
+        "Pricing is based on project scope, labor, and contractor costs.",
+        "Final scope and pricing confirmed after onsite review.",
+        "Any additional work requires written approval."
     ];
-
-    if (analysis.source === "gemini") {
-        assumptions.push("Automated extraction used to map inspector report to repair items.");
-    } else if (analysis.source === "heuristic" && analysis.reportId) {
-        assumptions.push("Rule-based extraction used for the inspector report.");
-    }
 
     if (fallbackReport) {
         assumptions.push("Latest uploaded report used because no report ID was provided.");
