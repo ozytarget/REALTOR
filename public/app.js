@@ -10,7 +10,6 @@ const estimateResult = document.getElementById("estimateResult");
 const reportIdInput = document.getElementById("reportId");
 
 let currentEstimate = null;
-let isEditMode = false;
 let selectedReportFile = null;
 const MAX_UPLOAD_MB = 50;
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
@@ -360,54 +359,12 @@ function renderEstimate(estimate) {
                 ? warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")
                 : "";
 
-        const editRows = lineItems.length
-                ? lineItems
-                        .map((item, index) => {
-                                const description = escapeHtml(item.description);
-                                const totalValue = formatAmountInput(item.total);
-                                const isCritical = item.critical ? "true" : "false";
-                                return `
-                    <div class="edit-row" data-edit-index="${index}">
-                        <input
-                            class="edit-input"
-                            data-field="description"
-                            type="text"
-                            value="${description}"
-                            ${isEditMode ? "" : "disabled"}
-                        />
-                        <input
-                            class="edit-input amount"
-                            data-field="total"
-                            type="text"
-                            value="${totalValue}"
-                            ${isEditMode ? "" : "disabled"}
-                        />
-                        <select class="edit-input" data-field="critical" ${isEditMode ? "" : "disabled"}>
-                            <option value="true" ${isCritical === "true" ? "selected" : ""}>Critical</option>
-                            <option value="false" ${isCritical === "false" ? "selected" : ""}>Additional</option>
-                        </select>
-                        <button
-                            type="button"
-                            class="btn ghost small"
-                            data-remove-index="${index}"
-                            ${isEditMode ? "" : "disabled"}
-                        >
-                            Remove
-                        </button>
-                    </div>
-                `;
-                        })
-                        .join("")
-                : "<p class=\"muted\">No line items yet.</p>";
-
-        const editButtonLabel = isEditMode ? "Finish Editing" : "Edit Estimate";
-        const editBodyStyle = isEditMode ? "" : "style=\"display:none\"";
         const customTotalValue = currentEstimate.customTotal
                 ? formatAmountInput(currentEstimate.customTotal)
                 : "";
         const customTotalNote = currentEstimate.customTotal
-                ? "<p class=\"muted\">Custom total applied.</p>"
-                : "<p class=\"muted\">Optional. Overrides the calculated total for PDF output.</p>";
+                ? "<p class=\"muted\">Custom total applied. Line items remain AI-generated.</p>"
+                : "<p class=\"muted\">Optional. Overrides the total while keeping AI line items.</p>";
 
         estimateResult.innerHTML = `
         <div class="output-header">
@@ -437,27 +394,17 @@ function renderEstimate(estimate) {
             ${warningList ? `<ul class=\"analysis-warnings\">${warningList}</ul>` : ""}
         </div>
         <div class="analysis-block">
-            <div class="edit-header">
-                <h4>Estimate Adjustments</h4>
-                <button type="button" class="btn ghost small" id="toggleEditEstimate">${editButtonLabel}</button>
-            </div>
-            <div class="edit-body" ${editBodyStyle}>
-                <div class="edit-grid">
-                    ${editRows}
-                </div>
-                <button type="button" class="btn ghost small" id="addLineItem">Add Line Item</button>
-                <div class="edit-field">
-                    <label for="customTotal">Custom Total (optional)</label>
-                    <input
-                        id="customTotal"
-                        class="edit-input amount"
-                        data-field="customTotal"
-                        type="text"
-                        value="${customTotalValue}"
-                        ${isEditMode ? "" : "disabled"}
-                    />
-                    ${customTotalNote}
-                </div>
+            <h4>Total Adjustment</h4>
+            <div class="edit-field">
+                <label for="customTotal">Custom Total (optional)</label>
+                <input
+                    id="customTotal"
+                    class="edit-input amount"
+                    data-field="customTotal"
+                    type="text"
+                    value="${customTotalValue}"
+                />
+                ${customTotalNote}
             </div>
         </div>
         <div class="total-row">
@@ -480,8 +427,6 @@ function renderEstimate(estimate) {
             <button class="btn ghost" id="downloadPdf">Download Estimate PDF</button>
         </div>
     `;
-
-        estimateResult.classList.toggle("is-editing", isEditMode);
 
     const downloadButton = document.getElementById("downloadPdf");
     if (downloadButton) {
@@ -523,39 +468,6 @@ async function downloadEstimatePdf(estimate) {
     }
 }
 
-function handleEstimateClick(event) {
-    const toggleButton = event.target.closest("#toggleEditEstimate");
-    if (toggleButton) {
-        isEditMode = !isEditMode;
-        renderEstimate(currentEstimate || {});
-        return;
-    }
-
-    const addButton = event.target.closest("#addLineItem");
-    if (addButton) {
-        if (!currentEstimate) return;
-        currentEstimate.lineItems = Array.isArray(currentEstimate.lineItems)
-            ? currentEstimate.lineItems
-            : [];
-        currentEstimate.lineItems.push({
-            description: "Custom line item",
-            total: 0,
-            critical: false
-        });
-        renderEstimate(currentEstimate);
-        return;
-    }
-
-    const removeButton = event.target.closest("[data-remove-index]");
-    if (removeButton && currentEstimate && Array.isArray(currentEstimate.lineItems)) {
-        const index = Number(removeButton.getAttribute("data-remove-index"));
-        if (!Number.isNaN(index)) {
-            currentEstimate.lineItems.splice(index, 1);
-            renderEstimate(currentEstimate);
-        }
-    }
-}
-
 function handleEstimateChange(event) {
     if (!currentEstimate) return;
     const target = event.target;
@@ -565,32 +477,9 @@ function handleEstimateChange(event) {
         renderEstimate(currentEstimate);
         return;
     }
-
-    const row = target.closest("[data-edit-index]");
-    if (!row) return;
-
-    const index = Number(row.getAttribute("data-edit-index"));
-    const field = target.getAttribute("data-field");
-    if (Number.isNaN(index) || !field || !currentEstimate.lineItems) return;
-
-    const item = currentEstimate.lineItems[index];
-    if (!item) return;
-
-    if (field === "description") {
-        item.description = target.value.trim();
-    }
-    if (field === "total") {
-        item.total = normalizeAmount(target.value);
-    }
-    if (field === "critical") {
-        item.critical = target.value === "true";
-    }
-
-    renderEstimate(currentEstimate);
 }
 
 if (estimateResult) {
-    estimateResult.addEventListener("click", handleEstimateClick);
     estimateResult.addEventListener("change", handleEstimateChange);
 }
 

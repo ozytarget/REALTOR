@@ -416,6 +416,24 @@ main {
     gap: 8px;
 }
 
+.edit-input {
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    background: #fff;
+}
+
+.edit-input.amount {
+    text-align: right;
+}
+
+.edit-field {
+    display: grid;
+    gap: 6px;
+}
+
 .analysis-list,
 .analysis-warnings,
 .estimate-output ul {
@@ -561,5 +579,9 @@ main {
     .logo {
         width: 100px;
         height: 72px;
+    }
+
+    .edit-row {
+        grid-template-columns: 1fr;
     }
 }
