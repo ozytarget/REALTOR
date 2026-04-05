@@ -83,21 +83,37 @@ body::after {
 
 .brand {
     display: grid;
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto 1fr auto;
     gap: 24px;
     align-items: start;
+}
+
+.brand-copy {
+    display: grid;
+    gap: 0;
+}
+
+.brand-estimates {
+    justify-self: end;
+    text-align: right;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-weight: 700;
+    color: var(--primary);
+    font-size: 14px;
+    padding-top: 4px;
 }
 
 .logo {
     width: 140px;
     height: 100px;
-    border-radius: 20px;
-    background: #fff;
-    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: transparent;
+    border: none;
     display: grid;
     place-items: center;
     padding: 6px;
-    box-shadow: 0 14px 30px rgba(12, 60, 120, 0.2);
+    box-shadow: none;
     overflow: hidden;
 }
 
@@ -588,6 +604,11 @@ main {
 
     .brand {
         grid-template-columns: 1fr;
+    }
+
+    .brand-estimates {
+        justify-self: start;
+        text-align: left;
     }
 
     .logo {
