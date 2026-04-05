@@ -14,6 +14,7 @@ const TAX_RATE = 0.078;
 const uploadsDir = path.join(__dirname, "uploads");
 const REPORT_INDEX_PATH = path.join(uploadsDir, "report-index.json");
 const PRICING_PATH = path.join(__dirname, "data", "pricing.json");
+const LOGO_PATH = path.join(__dirname, "public", "assets", "a-pro-handyman-llc.jpeg");
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
 const geminiClient = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
@@ -710,9 +711,22 @@ function generateEstimatePdf(estimate, res) {
     const doc = new PDFDocument({ margin: 40, size: "LETTER" });
     doc.pipe(res);
 
-    doc.fontSize(20).text("Estimate", { align: "right" });
+    const headerTop = doc.y;
+    let headerBottom = headerTop;
+
+    if (fs.existsSync(LOGO_PATH)) {
+        const logoWidth = 140;
+        const logoHeight = 90;
+        doc.image(LOGO_PATH, doc.page.margins.left, headerTop, {
+            fit: [logoWidth, logoHeight]
+        });
+        headerBottom = Math.max(headerBottom, headerTop + logoHeight);
+    }
+
+    doc.fontSize(20).text("Estimate", 0, headerTop, { align: "right" });
     doc.fontSize(10).text(`Estimate ID: ${estimate.estimateId}`, { align: "right" });
-    doc.moveDown(0.5);
+    headerBottom = Math.max(headerBottom, doc.y);
+    doc.y = headerBottom + 10;
 
     doc.fontSize(12).text(estimate.company || "A PRO HANDYMAN LLC");
     if (estimate.contractor) {
