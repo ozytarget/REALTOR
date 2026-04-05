@@ -14,7 +14,7 @@ const TAX_RATE = 0.078;
 
 const uploadsBaseDir = path.join(__dirname, "uploads");
 const PRICING_PATH = path.join(__dirname, "data", "pricing.json");
-const LOGO_PATH = path.join(__dirname, "public", "assets", "a-pro-handyman-llc.jpeg");
+const LOGO_PATH = path.join(__dirname, "public", "assets", "logo.png");
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
 const geminiClient = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
