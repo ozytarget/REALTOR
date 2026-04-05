@@ -53,9 +53,10 @@ function roundCurrency(value) {
     return Math.round(value * 100) / 100;
 }
 
-function normalizeLineItems(items, prefix) {
+function normalizeLineItems(items, prefix, source) {
     const lineItems = Array.isArray(items) ? items : [];
     const safePrefix = prefix || "estimate";
+    const safeSource = source || "ai";
     return lineItems.map((item, index) => {
         const fallbackTotal = Number(item.material || 0) + Number(item.labor || 0);
         return {
@@ -65,7 +66,8 @@ function normalizeLineItems(items, prefix) {
             total: normalizeAmount(item.total || fallbackTotal),
             material: Number.isFinite(Number(item.material)) ? Number(item.material) : 0,
             labor: Number.isFinite(Number(item.labor)) ? Number(item.labor) : 0,
-            critical: Boolean(item.critical)
+            critical: Boolean(item.critical),
+            source: item.source || safeSource
         };
     });
 }
@@ -120,10 +122,20 @@ function calculateTotals(estimate) {
 }
 
 function normalizeEstimate(estimate) {
-    const baseLineItems = normalizeLineItems(
+    const aiLineItems = normalizeLineItems(
         estimate.baseLineItems || estimate.lineItems || [],
-        estimate.estimateId
+        estimate.estimateId,
+        "ai"
     );
+    const customItems = normalizeLineItems(
+        estimate.customItems || [],
+        `${estimate.estimateId}-custom`,
+        "custom"
+    ).map((item) => ({
+        ...item,
+        critical: false
+    }));
+    const baseLineItems = [...aiLineItems, ...customItems];
     const excludedRowIds = Array.isArray(estimate.excludedRowIds)
         ? estimate.excludedRowIds
         : [];
@@ -152,6 +164,7 @@ function normalizeEstimate(estimate) {
     return {
         ...estimate,
         baseLineItems,
+        customItems,
         excludedRowIds,
         lineItems: adjustedLineItems,
         criticalItems,
@@ -381,11 +394,17 @@ function renderEstimate(estimate) {
         : currentEstimate && Array.isArray(currentEstimate.excludedRowIds)
             ? currentEstimate.excludedRowIds
             : [];
+    const customItems = estimateIdChanged
+        ? []
+        : currentEstimate && Array.isArray(currentEstimate.customItems)
+            ? currentEstimate.customItems
+            : [];
 
     const baseEstimate = {
         ...estimate,
         baseLineItems,
         excludedRowIds,
+        customItems,
         customTotal: typeof estimate.customTotal !== "undefined"
             ? estimate.customTotal
             : currentEstimate && typeof currentEstimate.customTotal !== "undefined"
@@ -456,18 +475,19 @@ function renderEstimate(estimate) {
             ? "<p class=\"muted\">Custom total applied. Line items adjusted proportionally.</p>"
             : "<p class=\"muted\">Optional. Adjusts the total and scales line items.</p>";
         const serviceRows = currentEstimate.baseLineItems && currentEstimate.baseLineItems.length
-            ? currentEstimate.baseLineItems
+                ? currentEstimate.baseLineItems
                 .map((item) => {
                     const rowId = item.rowId;
                     const isExcluded = currentEstimate.excludedRowIds.includes(rowId);
                     const label = isExcluded ? "Restore" : "Remove";
                     const status = isExcluded ? "Excluded" : "Included";
                     const rowClass = isExcluded ? "service-row is-excluded" : "service-row";
+                                const sourceLabel = item.source === "custom" ? "Custom" : "AI";
                     return `
                 <div class="${rowClass}">
                 <div>
                     <strong>${escapeHtml(item.description)}</strong>
-                    <div class="muted">${status}</div>
+                            <div class="muted">${sourceLabel} · ${status}</div>
                 </div>
                 <button
                     type="button"
@@ -517,6 +537,24 @@ function renderEstimate(estimate) {
                     ${serviceRows}
                 </div>
                 <p class="muted">Remove a service to exclude it from totals and the PDF.</p>
+            </div>
+            <div class="edit-field">
+                <label>Add Service</label>
+                <div class="add-row">
+                    <input
+                        id="customItemDescription"
+                        class="edit-input"
+                        type="text"
+                        placeholder="Service description"
+                    />
+                    <input
+                        id="customItemAmount"
+                        class="edit-input amount"
+                        type="text"
+                        placeholder="0.00"
+                    />
+                    <button type="button" class="btn ghost small" id="addCustomItem">Add</button>
+                </div>
             </div>
             <div class="edit-field">
                 <label for="customTotal">Custom Total (optional)</label>
@@ -641,6 +679,42 @@ function handleEstimateChange(event) {
 
 function handleEstimateClick(event) {
     if (!currentEstimate) return;
+    const addButton = event.target.closest("#addCustomItem");
+    if (addButton) {
+        const descriptionInput = document.getElementById("customItemDescription");
+        const amountInput = document.getElementById("customItemAmount");
+        const description = descriptionInput ? descriptionInput.value.trim() : "";
+        const amount = amountInput ? normalizeAmount(amountInput.value) : 0;
+
+        if (!description) {
+            estimateStatus.textContent = "Enter a service description.";
+            return;
+        }
+
+        if (!Number.isFinite(amount) || amount <= 0) {
+            estimateStatus.textContent = "Enter a valid amount for the service.";
+            return;
+        }
+
+        const customItems = Array.isArray(currentEstimate.customItems)
+            ? currentEstimate.customItems
+            : [];
+        customItems.push({
+            description,
+            total: amount,
+            critical: false,
+            source: "custom",
+            rowId: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+        });
+        currentEstimate.customItems = customItems;
+
+        if (descriptionInput) descriptionInput.value = "";
+        if (amountInput) amountInput.value = "";
+        estimateStatus.textContent = "Custom service added.";
+        renderEstimate(currentEstimate);
+        return;
+    }
+
     const toggleButton = event.target.closest("[data-toggle-row-id]");
     if (!toggleButton) return;
 
