@@ -1,0 +1,18 @@
+{
+    "name": "brokers-web",
+    "version": "0.1.0",
+    "private": true,
+    "description": "A PRO HANDYMAN LLC estimate portal for realtors.",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js"
+    },
+    "dependencies": {
+        "@google/generative-ai": "^0.21.0",
+        "dotenv": "^16.4.5",
+        "express": "^4.19.2",
+        "multer": "^2.0.0",
+        "pdf-parse": "^1.1.1",
+        "pdfkit": "^0.15.0"
+    }
+}

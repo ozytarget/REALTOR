@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>A PRO HANDYMAN LLC | Estimate Portal</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+    <div class="page-shell">
+        <header class="hero" data-reveal>
+            <div class="hero-main">
+                <div class="brand">
+                    <div class="logo">APH</div>
+                    <div>
+                        <p class="eyebrow">Estimate Portal for Realtors</p>
+                        <h1>Welcome to A PRO HANDYMAN LLC</h1>
+                        <p class="lead">
+                            Upload inspector reports, capture property details, and generate
+                            regional repair estimates faster with smart pricing logic.
+                        </p>
+                        <div class="cta-row">
+                            <a class="btn primary" href="#estimate">Start an Estimate</a>
+                            <a class="btn ghost" href="#documents">Open Document Center</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="hero-highlights">
+                    <div class="highlight-card">
+                        <h3>Smart Estimate Engine</h3>
+                        <p>
+                            Automatically applies regional labor rates and placeholder Home
+                            Depot material pricing averages.
+                        </p>
+                    </div>
+                    <div class="highlight-card">
+                        <h3>Document Download Area</h3>
+                        <p>
+                            Upload inspector PDFs and keep them ready for instant download.
+                        </p>
+                    </div>
+                    <div class="highlight-card">
+                        <h3>Contractor-Ready Output</h3>
+                        <p>
+                            Estimates are prepared under A PRO HANDYMAN LLC with GA tax rate
+                            applied.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <aside class="company-card">
+                <div class="company-header">
+                    <h2>Company Information</h2>
+                    <p>Appears on estimates and invoices.</p>
+                </div>
+                <dl>
+                    <div>
+                        <dt>Company Name</dt>
+                        <dd>A PRO HANDYMAN LLC</dd>
+                    </div>
+                    <div>
+                        <dt>State Tax Rate</dt>
+                        <dd>7.8%</dd>
+                    </div>
+                    <div>
+                        <dt>Contractor</dt>
+                        <dd>Oscar Urbina</dd>
+                    </div>
+                    <div>
+                        <dt>Address</dt>
+                        <dd>Duluth, GA</dd>
+                    </div>
+                    <div>
+                        <dt>Email</dt>
+                        <dd>servicespro911@aol.com</dd>
+                    </div>
+                    <div>
+                        <dt>Phone</dt>
+                        <dd>(678) 725-8896</dd>
+                    </div>
+                    <div>
+                        <dt>Website</dt>
+                        <dd><a href="https://acme.com">acme.com</a></dd>
+                    </div>
+                    <div>
+                        <dt>Scheduling URL</dt>
+                        <dd>
+                            <a href="https://aprohandyman.setmore.com?utm_source=qr-code&utm_medium=settings-share-bp">
+                                aprohandyman.setmore.com
+                            </a>
+                        </dd>
+                    </div>
+                </dl>
+                <div class="logo-note">
+                    <span class="logo-placeholder">Company Logo</span>
+                    <p>Replace with your official logo file when ready.</p>
+                </div>
+            </aside>
+        </header>
+
+        <main>
+            <section id="documents" class="panel" data-reveal>
+                <div class="panel-text">
+                    <h2>Document Center</h2>
+                    <p>
+                        Realtors can upload inspector PDFs and download them anytime to
+                        build repair estimates.
+                    </p>
+                    <div id="reportsList" class="report-list">
+                        <p class="muted">No reports uploaded yet.</p>
+                    </div>
+                </div>
+                <form class="upload-card" id="uploadForm">
+                    <h3>Upload Inspector Report (PDF)</h3>
+                    <p class="muted">
+                        PDF only. Max 10MB. Stored securely in the portal.
+                    </p>
+                    <label class="dropzone" id="dropzone">
+                        <input type="file" id="reportFile" name="report" accept="application/pdf" />
+                        <span class="drop-title">Drag & drop or click to upload</span>
+                        <span class="drop-subtitle">Supported file: .pdf</span>
+                    </label>
+                    <button type="submit" class="btn primary">Upload Report</button>
+                    <p id="uploadStatus" class="status"></p>
+                </form>
+            </section>
+
+            <section id="estimate" class="panel" data-reveal>
+                <div class="panel-text">
+                    <h2>Estimate Builder</h2>
+                    <p>
+                        Enter the property address, add a report ID to trigger AI
+                        extraction, and the estimate engine will separate critical repairs.
+                    </p>
+                    <form id="estimateForm" class="estimate-form">
+                        <div class="field">
+                            <label for="addressLine">Property Address</label>
+                            <input id="addressLine" name="addressLine" type="text" placeholder="123 Main St, Duluth GA"
+                                required />
+                        </div>
+                        <div class="field-row">
+                            <div class="field">
+                                <label for="city">City</label>
+                                <input id="city" name="city" type="text" placeholder="Duluth" />
+                            </div>
+                            <div class="field">
+                                <label for="state">State</label>
+                                <input id="state" name="state" type="text" placeholder="GA" maxlength="2" />
+                            </div>
+                            <div class="field">
+                                <label for="zip">Zip</label>
+                                <input id="zip" name="zip" type="text" placeholder="30096" />
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field">
+                                <label for="propertyType">Property Type</label>
+                                <select id="propertyType" name="propertyType">
+                                    <option>Single Family</option>
+                                    <option>Townhome</option>
+                                    <option>Condo</option>
+                                    <option>Multi-Family</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label for="reportId">Report Reference (optional)</label>
+                                <input id="reportId" name="reportId" type="text"
+                                    placeholder="Report ID from Document Center" />
+                                <p class="field-help">
+                                    Use the report ID to auto-detect repairs and critical items.
+                                </p>
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label>Repair Areas</label>
+                            <div class="pill-grid">
+                                <label class="pill">
+                                    <input type="checkbox" name="repairAreas" value="roof" />
+                                    Roof
+                                </label>
+                                <label class="pill">
+                                    <input type="checkbox" name="repairAreas" value="plumbing" />
+                                    Plumbing
+                                </label>
+                                <label class="pill">
+                                    <input type="checkbox" name="repairAreas" value="electrical" />
+                                    Electrical
+                                </label>
+                                <label class="pill">
+                                    <input type="checkbox" name="repairAreas" value="drywall" />
+                                    Drywall
+                                </label>
+                                <label class="pill">
+                                    <input type="checkbox" name="repairAreas" value="paint" />
+                                    Paint
+                                </label>
+                                <label class="pill">
+                                    <input type="checkbox" name="repairAreas" value="flooring" />
+                                    Flooring
+                                </label>
+                                <label class="pill">
+                                    <input type="checkbox" name="repairAreas" value="hvac" />
+                                    HVAC
+                                </label>
+                                <label class="pill">
+                                    <input type="checkbox" name="repairAreas" value="windows" />
+                                    Windows
+                                </label>
+                                <label class="pill">
+                                    <input type="checkbox" name="repairAreas" value="foundation" />
+                                    Foundation
+                                </label>
+                                <label class="pill">
+                                    <input type="checkbox" name="repairAreas" value="exterior" />
+                                    Exterior
+                                </label>
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label for="summary">Inspector Summary (optional)</label>
+                            <textarea id="summary" name="summary" rows="4"
+                                placeholder="Paste inspector notes or repair scope here."></textarea>
+                        </div>
+                        <button type="submit" class="btn primary">Generate Estimate</button>
+                        <p class="status" id="estimateStatus"></p>
+                    </form>
+                </div>
+                <aside class="estimate-output" id="estimateResult">
+                    <h3>Your estimate will appear here.</h3>
+                    <p class="muted">
+                        The system uses regional labor averages and placeholder material
+                        pricing until real data integrations are connected.
+                    </p>
+                </aside>
+            </section>
+
+            <section class="panel steps" data-reveal>
+                <div class="panel-text">
+                    <h2>How It Works</h2>
+                    <p>
+                        Built for fast realtor responses while keeping contractor
+                        approvals in control.
+                    </p>
+                </div>
+                <div class="step-grid">
+                    <div class="step-card">
+                        <span>01</span>
+                        <h3>Upload Report</h3>
+                        <p>Store inspector PDFs for quick access and sharing.</p>
+                    </div>
+                    <div class="step-card">
+                        <span>02</span>
+                        <h3>Capture Property Data</h3>
+                        <p>Address and repair areas inform regional pricing.</p>
+                    </div>
+                    <div class="step-card">
+                        <span>03</span>
+                        <h3>Generate Estimate</h3>
+                        <p>Receive a structured estimate ready for review.</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <div>
+                <h4>A PRO HANDYMAN LLC</h4>
+                <p>Duluth, GA</p>
+            </div>
+            <div>
+                <p>Email: servicespro911@aol.com</p>
+                <p>Phone: (678) 725-8896</p>
+            </div>
+            <div>
+                <p>Schedule: aprohandyman.setmore.com</p>
+                <p>Tax Rate: 7.8%</p>
+            </div>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

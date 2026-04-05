@@ -1,0 +1,95 @@
+{
+    "regions": {
+        "GA": {
+            "laborMultiplier": 1.0,
+            "materialMultiplier": 1.0
+        },
+        "FL": {
+            "laborMultiplier": 1.05,
+            "materialMultiplier": 1.08
+        },
+        "SC": {
+            "laborMultiplier": 0.98,
+            "materialMultiplier": 0.97
+        },
+        "NC": {
+            "laborMultiplier": 1.02,
+            "materialMultiplier": 1.01
+        },
+        "TN": {
+            "laborMultiplier": 0.97,
+            "materialMultiplier": 0.96
+        },
+        "AL": {
+            "laborMultiplier": 0.95,
+            "materialMultiplier": 0.95
+        },
+        "DEFAULT": {
+            "laborMultiplier": 1.0,
+            "materialMultiplier": 1.0
+        }
+    },
+    "items": {
+        "water_heater_replace": {
+            "label": "Water Heater Replacement",
+            "material": 450,
+            "labor": 250,
+            "critical": true,
+            "notes": "Includes standard 50-gallon unit, flex lines, and shutoff valve.",
+            "parts": [
+                "50-gallon water heater",
+                "flex water lines",
+                "shutoff valve",
+                "drain pan"
+            ]
+        },
+        "water_heater_repair": {
+            "label": "Water Heater Repair (Parts)",
+            "material": 180,
+            "labor": 220,
+            "critical": true,
+            "notes": "Includes thermostat or relief valve plus fittings.",
+            "parts": [
+                "thermostat",
+                "pressure relief valve",
+                "supply line fittings"
+            ]
+        },
+        "roof_leak": {
+            "label": "Roof Leak Repair",
+            "material": 420,
+            "labor": 680,
+            "critical": true
+        },
+        "plumbing_leak": {
+            "label": "Plumbing Leak Repair",
+            "material": 140,
+            "labor": 260,
+            "critical": true
+        },
+        "electrical_hazard": {
+            "label": "Electrical Safety Repair",
+            "material": 160,
+            "labor": 320,
+            "critical": true
+        },
+        "hvac_service": {
+            "label": "HVAC Service and Repair",
+            "material": 220,
+            "labor": 480,
+            "critical": false
+        },
+        "foundation_crack": {
+            "label": "Foundation Crack Repair",
+            "material": 600,
+            "labor": 900,
+            "critical": true
+        },
+        "general_repair": {
+            "label": "General Repair Allowance",
+            "material": 600,
+            "labor": 900,
+            "critical": false
+        }
+    }
+}
