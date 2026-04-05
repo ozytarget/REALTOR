@@ -8,11 +8,15 @@ const estimateForm = document.getElementById("estimateForm");
 const estimateStatus = document.getElementById("estimateStatus");
 const estimateResult = document.getElementById("estimateResult");
 const reportIdInput = document.getElementById("reportId");
+const uploadButton = uploadForm
+    ? uploadForm.querySelector("button[type=\"submit\"]")
+    : null;
 
 let currentEstimate = null;
 let selectedReportFile = null;
 const MAX_UPLOAD_MB = 50;
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+let uploadInProgress = false;
 let suspendCleanup = false;
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
@@ -183,6 +187,61 @@ function updateDropzoneLabel(file) {
     title.textContent = `Selected: ${file.name}`;
 }
 
+function setUploadBusy(isBusy) {
+    uploadInProgress = isBusy;
+    if (uploadButton) {
+        uploadButton.disabled = isBusy;
+        uploadButton.textContent = isBusy ? "Uploading..." : "Upload Report";
+    }
+}
+
+function clearSelectedFile() {
+    selectedReportFile = null;
+    if (reportFile) {
+        reportFile.value = "";
+    }
+    updateDropzoneLabel();
+}
+
+async function handleUpload(file) {
+    if (!file || uploadInProgress) {
+        return;
+    }
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+        uploadStatus.textContent = `File too large. Max ${MAX_UPLOAD_MB}MB.`;
+        return;
+    }
+
+    setUploadBusy(true);
+    uploadStatus.textContent = "Uploading report...";
+
+    const formData = new FormData();
+    formData.append("report", file);
+
+    try {
+        const response = await fetch("/api/upload", {
+            method: "POST",
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || "Upload failed.");
+        }
+
+        const result = await response.json();
+        const report = result.report || {};
+        uploadStatus.textContent = `Uploaded ${report.originalName || "report"}. Report ID: ${report.id || ""}.`;
+        clearSelectedFile();
+        await loadReports();
+    } catch (error) {
+        uploadStatus.textContent = error.message || "Upload failed.";
+    } finally {
+        setUploadBusy(false);
+    }
+}
+
 async function loadReports() {
     try {
         const response = await fetch("/api/reports");
@@ -245,39 +304,13 @@ if (uploadForm) {
     const file = (reportFile && reportFile.files && reportFile.files[0]) || selectedReportFile;
     if (!file) {
         uploadStatus.textContent = "Select a PDF file to upload.";
-        return;
-    }
-
-    if (file.size > MAX_UPLOAD_BYTES) {
-        uploadStatus.textContent = `File too large. Max ${MAX_UPLOAD_MB}MB.`;
-        return;
-    }
-
-    uploadStatus.textContent = "Uploading report...";
-
-    const formData = new FormData();
-    formData.append("report", file);
-
-    try {
-        const response = await fetch("/api/upload", {
-            method: "POST",
-            body: formData
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || "Upload failed.");
+        if (reportFile) {
+            reportFile.click();
         }
-
-        const result = await response.json();
-        const report = result.report || {};
-        uploadStatus.textContent = `Uploaded ${report.originalName || "report"}. Report ID: ${report.id || ""}.`;
-        reportFile.value = "";
-        updateDropzoneLabel();
-        await loadReports();
-    } catch (error) {
-        uploadStatus.textContent = error.message || "Upload failed.";
+        return;
     }
+
+    await handleUpload(file);
     });
 }
 
@@ -285,6 +318,9 @@ if (reportFile) {
     reportFile.addEventListener("change", () => {
         selectedReportFile = reportFile.files[0] || null;
         updateDropzoneLabel(selectedReportFile);
+        if (selectedReportFile) {
+            handleUpload(selectedReportFile);
+        }
     });
 }
 
@@ -321,6 +357,9 @@ if (dropzone) {
         }
 
         updateDropzoneLabel(selectedReportFile);
+        if (selectedReportFile) {
+            handleUpload(selectedReportFile);
+        }
     });
 }
 
