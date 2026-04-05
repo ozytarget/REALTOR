@@ -13,6 +13,7 @@ let currentEstimate = null;
 let selectedReportFile = null;
 const MAX_UPLOAD_MB = 50;
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+let suspendCleanup = false;
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -190,7 +191,7 @@ async function loadReports() {
                 const size = formatSize(report.size);
                 const downloadUrl = report.downloadUrl || report.url || "";
 
-                return `
+                                return `
           <div class="report-item">
             <div>
               <strong>${name}</strong>
@@ -206,7 +207,14 @@ async function loadReports() {
               >
                                 Use for Estimate
               </button>
-                            <a href="${downloadUrl}">Download PDF</a>
+                                                        <button
+                                                                type="button"
+                                                                class="btn ghost small"
+                                                                data-download-url="${downloadUrl}"
+                                                                data-download-name="${name}"
+                                                        >
+                                                                Download PDF
+                                                        </button>
             </div>
           </div>
         `;
@@ -305,6 +313,14 @@ if (dropzone) {
 
 if (reportsList) {
     reportsList.addEventListener("click", (event) => {
+    const downloadButton = event.target.closest("[data-download-url]");
+    if (downloadButton) {
+        const url = downloadButton.getAttribute("data-download-url") || "";
+        const name = downloadButton.getAttribute("data-download-name") || "report.pdf";
+        downloadReport(url, name);
+        return;
+    }
+
     const target = event.target.closest("[data-report-id]");
     if (!target) return;
 
@@ -545,6 +561,7 @@ async function downloadEstimatePdf(estimate) {
     if (!estimate) return;
     const payload = normalizeEstimate(estimate);
     estimateStatus.textContent = "Preparing PDF...";
+    suspendCleanup = true;
 
     try {
         const response = await fetch("/api/estimate/pdf", {
@@ -572,6 +589,42 @@ async function downloadEstimatePdf(estimate) {
         estimateStatus.textContent = "PDF downloaded.";
     } catch (error) {
         estimateStatus.textContent = error.message;
+    } finally {
+        setTimeout(() => {
+            suspendCleanup = false;
+        }, 1500);
+    }
+}
+
+async function downloadReport(url, name) {
+    if (!url) return;
+    uploadStatus.textContent = "Preparing download...";
+    suspendCleanup = true;
+
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || "Unable to download report.");
+        }
+
+        const blob = await response.blob();
+        const fileName = name.toLowerCase().endsWith(".pdf") ? name : `${name}.pdf`;
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(downloadUrl);
+        uploadStatus.textContent = "Report downloaded.";
+    } catch (error) {
+        uploadStatus.textContent = error.message || "Download failed.";
+    } finally {
+        setTimeout(() => {
+            suspendCleanup = false;
+        }, 1500);
     }
 }
 
@@ -622,7 +675,7 @@ loadReports();
 let sessionCleanupSent = false;
 
 function sendSessionCleanup() {
-    if (sessionCleanupSent) return;
+    if (sessionCleanupSent || suspendCleanup) return;
     sessionCleanupSent = true;
 
     if (navigator.sendBeacon) {
