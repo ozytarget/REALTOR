@@ -1049,9 +1049,9 @@ function generateEstimatePdf(estimate, res) {
 
     const contentX = centeredLeft;
     doc.fontSize(11).text("Property Details", contentX, doc.y, { width: contentWidth });
-    doc.fontSize(10).text(`Property Address: ${propertyAddress}`, contentX, doc.y, { width: contentWidth });
+    doc.fontSize(10).text(propertyAddress, contentX, doc.y, { width: contentWidth });
     if (cityStateZip) {
-        doc.fontSize(10).text(`City/State/Zip: ${cityStateZip}`, contentX, doc.y, { width: contentWidth });
+        doc.fontSize(10).text(cityStateZip, contentX, doc.y, { width: contentWidth });
     }
     doc.moveDown(0.5);
 
@@ -1064,15 +1064,35 @@ function generateEstimatePdf(estimate, res) {
         width: contentWidth
     });
 
-    doc.moveDown();
-    doc.fontSize(12).text("Totals", contentX, doc.y, { width: contentWidth });
-    doc.fontSize(10).text(`Subtotal: ${formatCurrency(estimate.totals.subtotal)}`, contentX, doc.y, { width: contentWidth });
-    doc.fontSize(10).text(`Tax (${(estimate.taxRate * 100).toFixed(1)}%): ${formatCurrency(estimate.totals.tax)}`,
-        contentX,
-        doc.y,
-        { width: contentWidth }
-    );
-    doc.fontSize(11).text(`Grand Total: ${formatCurrency(estimate.totals.total)}`, contentX, doc.y, { width: contentWidth });
+    doc.moveDown(0.6);
+    const totalsWidth = 220;
+    const totalsX = rightX - totalsWidth;
+    const totalsAmountWidth = 90;
+    const totalsLabelWidth = totalsWidth - totalsAmountWidth;
+    const totalsTop = doc.y;
+
+    doc.lineWidth(0.5);
+    doc.moveTo(totalsX, totalsTop).lineTo(rightX, totalsTop).strokeColor("#d9d9d9").stroke();
+    doc.moveDown(0.4);
+
+    doc.fontSize(11).text("Totals", totalsX, doc.y, { width: totalsWidth, align: "right" });
+    doc.moveDown(0.2);
+
+    const renderTotalRow = (label, value, bold) => {
+        const rowY = doc.y;
+        doc.fontSize(bold ? 11 : 10).text(label, totalsX, rowY, { width: totalsLabelWidth });
+        doc.fontSize(bold ? 11 : 10).text(value, totalsX + totalsLabelWidth, rowY, {
+            width: totalsAmountWidth,
+            align: "right"
+        });
+        doc.moveDown(0.3);
+        doc.moveTo(totalsX, doc.y).lineTo(rightX, doc.y).strokeColor("#ededed").stroke();
+        doc.moveDown(0.2);
+    };
+
+    renderTotalRow("Subtotal", formatCurrency(estimate.totals.subtotal), false);
+    renderTotalRow(`Tax (${(estimate.taxRate * 100).toFixed(1)}%)`, formatCurrency(estimate.totals.tax), false);
+    renderTotalRow("Grand Total", formatCurrency(estimate.totals.total), true);
 
     doc.moveDown();
     doc.fontSize(11).text("Policy and Notes", contentX, doc.y, { width: contentWidth });
