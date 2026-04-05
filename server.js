@@ -97,7 +97,8 @@ app.get("/api/reports", (req, res) => {
                     storedName: entry.storedName,
                     size: stats.size,
                     uploadedAt: entry.uploadedAt,
-                    url: `/api/reports/${encodeURIComponent(entry.storedName)}`
+                    url: `/api/reports/${encodeURIComponent(entry.storedName)}`,
+                    downloadUrl: `/api/reports/download/${encodeURIComponent(entry.id)}`
                 };
             })
             .filter(Boolean);
@@ -122,6 +123,22 @@ app.get("/api/reports/:file", (req, res) => {
     }
 
     return res.download(filePath);
+});
+
+app.get("/api/reports/download/:id", (req, res) => {
+    const reportId = String(req.params.id || "").trim();
+    const entry = findReportEntry(reportId);
+
+    if (!entry) {
+        return res.status(404).json({ error: "Report not found." });
+    }
+
+    const filePath = path.join(uploadsDir, entry.storedName);
+    if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: "File not found." });
+    }
+
+    return res.download(filePath, entry.originalName || entry.storedName);
 });
 
 app.post("/api/estimate", async (req, res) => {
@@ -231,7 +248,9 @@ const REPAIR_CATALOG = {
 async function buildEstimate(payload) {
     const location = resolveLocation(payload);
     const regionProfile = getRegionProfile(location.state);
-    const reportEntry = payload.reportId ? findReportEntry(payload.reportId) : null;
+    const requestedReport = payload.reportId ? findReportEntry(payload.reportId) : null;
+    const fallbackReport = !requestedReport && !payload.summary ? getLatestReportEntry() : null;
+    const reportEntry = requestedReport || fallbackReport;
     const hasAnalysisInput = Boolean(payload.summary || reportEntry);
     const analysis = hasAnalysisInput
         ? await analyzeInspection({ reportEntry, summary: payload.summary, location })
@@ -259,6 +278,10 @@ async function buildEstimate(payload) {
         assumptions.push("Rule-based extraction used for the inspector report.");
     }
 
+    if (fallbackReport) {
+        assumptions.push("Latest uploaded report used because no report ID was provided.");
+    }
+
     return {
         estimateId: `EST-${Date.now()}`,
         createdAt: new Date().toISOString(),
@@ -281,6 +304,11 @@ async function buildEstimate(payload) {
         assumptions,
         notes: payload.summary ? ["Inspection summary provided."] : []
     };
+}
+
+function getLatestReportEntry() {
+    const index = loadReportIndex();
+    return index.length ? index[0] : null;
 }
 
 function buildEmptyAnalysis() {

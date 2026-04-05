@@ -61,6 +61,7 @@ async function loadReports() {
                     new Date(report.uploadedAt).toLocaleDateString("en-US")
                 );
                 const size = formatSize(report.size);
+                const downloadUrl = report.downloadUrl || report.url || "";
 
                 return `
           <div class="report-item">
@@ -70,15 +71,15 @@ async function loadReports() {
               <div class="muted">${uploaded} · ${size}</div>
             </div>
             <div class="report-actions">
-              <button
+                            <button
                 type="button"
                 class="btn ghost small"
                 data-report-id="${reportId}"
                 data-report-name="${name}"
               >
-                Use in Estimate
+                                Use for Estimate
               </button>
-              <a href="${report.url}">Download PDF</a>
+                            <a href="${downloadUrl}">Download PDF</a>
             </div>
           </div>
         `;
