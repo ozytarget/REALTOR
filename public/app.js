@@ -60,7 +60,7 @@ function roundCurrency(value) {
 function normalizeLineItems(items, prefix, source) {
     const lineItems = Array.isArray(items) ? items : [];
     const safePrefix = prefix || "estimate";
-    const safeSource = source || "ai";
+    const safeSource = source || "system";
     return lineItems.map((item, index) => {
         const fallbackTotal = Number(item.material || 0) + Number(item.labor || 0);
         return {
@@ -126,10 +126,10 @@ function calculateTotals(estimate) {
 }
 
 function normalizeEstimate(estimate) {
-    const aiLineItems = normalizeLineItems(
+    const baseLineItems = normalizeLineItems(
         estimate.baseLineItems || estimate.lineItems || [],
         estimate.estimateId,
-        "ai"
+        "system"
     );
     const customItems = normalizeLineItems(
         estimate.customItems || [],
@@ -139,11 +139,11 @@ function normalizeEstimate(estimate) {
         ...item,
         critical: false
     }));
-    const baseLineItems = [...aiLineItems, ...customItems];
     const excludedRowIds = Array.isArray(estimate.excludedRowIds)
         ? estimate.excludedRowIds
         : [];
-    const includedLineItems = applyExclusions(baseLineItems, excludedRowIds);
+    const combinedLineItems = [...baseLineItems, ...customItems];
+    const includedLineItems = applyExclusions(combinedLineItems, excludedRowIds);
     const customTotal = normalizeAmount(estimate.customTotal);
     const taxRate = Number(estimate.taxRate || 0);
     let adjustedLineItems = includedLineItems;
@@ -455,10 +455,21 @@ function renderEstimate(estimate) {
         const { lineItems, criticalItems, additionalItems, totals, analysis } = currentEstimate;
         const hasSplitItems = criticalItems.length > 0 || additionalItems.length > 0;
         const warnings = Array.isArray(analysis.warnings) ? analysis.warnings : [];
+        const analysisSourceLabelMap = {
+            gemini: "Automated",
+            heuristic: "Rule-based",
+            manual: "Manual"
+        };
+        const analysisSourceLabel = analysisSourceLabelMap[analysis.source] || "Manual";
         const location = currentEstimate.location || {};
-        const addressLine = location.addressLine && location.addressLine !== "(Address pending)"
-                ? location.addressLine
-                : "Address pending";
+        const addressLineValue = location.addressLine && location.addressLine !== "(Address pending)"
+            ? location.addressLine
+            : "";
+        const addressLine = addressLineValue || "Address pending";
+        const cityValue = location.city || "";
+        const stateValue = location.state || "";
+        const zipValue = location.zip || "";
+        const estimateIdValue = currentEstimate.estimateId || "";
         const cityStateZip = [
                 location.city && location.state ? `${location.city}, ${location.state}` : location.city || location.state,
                 location.zip
@@ -513,15 +524,18 @@ function renderEstimate(estimate) {
         const customTotalNote = currentEstimate.customTotal
             ? "<p class=\"muted\">Custom total applied. Line items adjusted proportionally.</p>"
             : "<p class=\"muted\">Optional. Adjusts the total and scales line items.</p>";
-        const serviceRows = currentEstimate.baseLineItems && currentEstimate.baseLineItems.length
-                ? currentEstimate.baseLineItems
-                .map((item) => {
+        const serviceItems = [
+            ...(currentEstimate.baseLineItems || []),
+            ...(currentEstimate.customItems || [])
+        ];
+        const serviceRows = serviceItems.length
+            ? serviceItems.map((item) => {
                     const rowId = item.rowId;
                     const isExcluded = currentEstimate.excludedRowIds.includes(rowId);
                     const label = isExcluded ? "Restore" : "Remove";
                     const status = isExcluded ? "Excluded" : "Included";
                     const rowClass = isExcluded ? "service-row is-excluded" : "service-row";
-                                const sourceLabel = item.source === "custom" ? "Custom" : "AI";
+                                const sourceLabel = item.source === "custom" ? "Custom" : "System";
                     return `
                 <div class="${rowClass}">
                 <div>
@@ -537,8 +551,7 @@ function renderEstimate(estimate) {
                 </button>
                 </div>
             `;
-                })
-                .join("")
+                }).join("")
             : "<p class=\"muted\">No services found.</p>";
 
         estimateResult.innerHTML = `
@@ -547,11 +560,62 @@ function renderEstimate(estimate) {
                 <h3>Estimate ${escapeHtml(currentEstimate.estimateId)}</h3>
                 <p class="muted">${escapeHtml(addressLine)}</p>
                 ${cityStateZip ? `<p class=\"muted\">${escapeHtml(cityStateZip)}</p>` : ""}
-                <p class="muted">Analysis source: ${escapeHtml(analysis.source || "manual")}</p>
+                <p class="muted">Analysis source: ${escapeHtml(analysisSourceLabel)}</p>
             </div>
             <div>
                 <strong>${currencyFormatter.format(totals.total)}</strong>
                 <div class="muted">Total</div>
+            </div>
+        </div>
+        <div class="analysis-block">
+            <h4>Estimate Details</h4>
+            <div class="edit-field">
+                <label for="estimateIdInput">Estimate Number</label>
+                <input
+                    id="estimateIdInput"
+                    class="edit-input"
+                    type="text"
+                    value="${escapeHtml(estimateIdValue)}"
+                />
+            </div>
+            <div class="edit-field">
+                <label for="addressLineInput">Property Address</label>
+                <input
+                    id="addressLineInput"
+                    class="edit-input"
+                    type="text"
+                    value="${escapeHtml(addressLineValue)}"
+                    placeholder="Street address"
+                />
+            </div>
+            <div class="detail-grid">
+                <div class="edit-field">
+                    <label for="cityInput">City</label>
+                    <input
+                        id="cityInput"
+                        class="edit-input"
+                        type="text"
+                        value="${escapeHtml(cityValue)}"
+                    />
+                </div>
+                <div class="edit-field">
+                    <label for="stateInput">State</label>
+                    <input
+                        id="stateInput"
+                        class="edit-input"
+                        type="text"
+                        value="${escapeHtml(stateValue)}"
+                    />
+                </div>
+                <div class="edit-field">
+                    <label for="zipInput">Zip</label>
+                    <input
+                        id="zipInput"
+                        class="edit-input"
+                        type="text"
+                        value="${escapeHtml(zipValue)}"
+                    />
+                </div>
             </div>
         </div>
         <div class="analysis-block">
@@ -563,7 +627,7 @@ function renderEstimate(estimate) {
             ${renderItems(hasSplitItems ? additionalItems : lineItems, "No additional repairs listed.")}
         </div>
         <div class="analysis-block">
-            <h4>AI Findings</h4>
+            <h4>Report Findings</h4>
             <p class="muted">${escapeHtml(analysis.summary || "No report analysis available.")}</p>
             ${repairsList ? `<ul class=\"analysis-list\">${repairsList}</ul>` : ""}
             ${warningList ? `<ul class=\"analysis-warnings\">${warningList}</ul>` : ""}
@@ -713,6 +777,41 @@ function handleEstimateChange(event) {
         currentEstimate.customTotal = target.value.trim();
         renderEstimate(currentEstimate);
         return;
+    }
+
+    if (target.id === "estimateIdInput") {
+        const nextId = target.value.trim();
+        if (nextId) {
+            currentEstimate.estimateId = nextId;
+        }
+        renderEstimate(currentEstimate);
+        return;
+    }
+
+    if (["addressLineInput", "cityInput", "stateInput", "zipInput"].includes(target.id)) {
+        const updatedLocation = {
+            addressLine: "",
+            city: "",
+            state: "",
+            zip: "",
+            ...(currentEstimate.location || {})
+        };
+
+        if (target.id === "addressLineInput") {
+            updatedLocation.addressLine = target.value.trim();
+        }
+        if (target.id === "cityInput") {
+            updatedLocation.city = target.value.trim();
+        }
+        if (target.id === "stateInput") {
+            updatedLocation.state = target.value.trim().toUpperCase();
+        }
+        if (target.id === "zipInput") {
+            updatedLocation.zip = target.value.trim();
+        }
+
+        currentEstimate.location = updatedLocation;
+        renderEstimate(currentEstimate);
     }
 }
 

@@ -348,7 +348,7 @@ async function buildEstimate(payload, sessionDir) {
     ];
 
     if (analysis.source === "gemini") {
-        assumptions.push("AI extraction used to map inspector report to repair items.");
+        assumptions.push("Automated extraction used to map inspector report to repair items.");
     } else if (analysis.source === "heuristic" && analysis.reportId) {
         assumptions.push("Rule-based extraction used for the inspector report.");
     }
@@ -1076,7 +1076,7 @@ function generateEstimatePdf(estimate, res) {
 
     if (estimate.analysis && estimate.analysis.summary) {
         doc.moveDown();
-        doc.fontSize(11).text("AI Findings", contentX, doc.y, { width: contentWidth });
+        doc.fontSize(11).text("Report Findings", contentX, doc.y, { width: contentWidth });
         doc.fontSize(9).text(estimate.analysis.summary, contentX, doc.y, { width: contentWidth });
     }
 

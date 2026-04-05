@@ -17,14 +17,15 @@ property information, and generate structured repair estimates.
 - The estimate engine uses placeholder Home Depot material averages and regional
   labor rate rules. Replace with real pricing data when ready.
 
-## AI report analysis (optional)
+## Report analysis (optional)
 
 1. Copy .env.example to .env
 2. Set GEMINI_API_KEY
 3. (Optional) Set GEMINI_MODEL
 
-When configured, the server will use Gemini to read PDFs (including scanned
-documents) and separate critical repairs from additional repairs.
+When configured, the server will use the extraction service to read PDFs
+(including scanned documents) and separate critical repairs from additional
+repairs.
 
 ## Pricing configuration
 
