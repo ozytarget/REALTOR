@@ -275,22 +275,13 @@ async function loadReports() {
             <div class="report-actions">
                             <button
                 type="button"
-                class="btn ghost small"
+                class="btn success large"
                 data-action="estimate"
                 data-report-id="${reportId}"
                 data-report-name="${name}"
               >
                                 Use for Estimate
               </button>
-                                                        <button
-                                                                type="button"
-                                                                class="btn ghost small"
-                                        data-action="download"
-                                                                data-download-url="${downloadUrl}"
-                                                                data-download-name="${name}"
-                                                        >
-                                                                Download PDF
-                                                        </button>
             </div>
           </div>
         `;
@@ -392,25 +383,6 @@ if (reportsList) {
     if (!reportsList.dataset.bound) {
         reportsList.dataset.bound = "true";
         reportsList.addEventListener("click", (event) => {
-    const downloadButton = event.target.closest("[data-action=\"download\"]");
-    if (downloadButton) {
-        event.preventDefault();
-        event.stopPropagation();
-        if (downloadButton.dataset.downloading === "true") {
-            return;
-        }
-        const url = downloadButton.getAttribute("data-download-url") || "";
-        const name = downloadButton.getAttribute("data-download-name") || "report.pdf";
-        downloadButton.dataset.downloading = "true";
-        downloadButton.disabled = true;
-        downloadReport(url, name)
-            .finally(() => {
-                downloadButton.disabled = false;
-                downloadButton.dataset.downloading = "false";
-            });
-        return;
-    }
-
     const target = event.target.closest("[data-action=\"estimate\"]");
     if (!target) return;
 

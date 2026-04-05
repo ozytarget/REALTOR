@@ -52,14 +52,11 @@
         <main>
             <section id="documents" class="panel" data-reveal>
                 <div class="panel-text">
-                    <h2>Inspection Documents</h2>
+                    <p class="step-label">Step 1</p>
+                    <h2>Upload Report</h2>
                     <p>
-                        Upload inspector PDFs and download them anytime to build repair
-                        estimates.
+                        Upload the inspection report to start your estimate.
                     </p>
-                    <div id="reportsList" class="report-list">
-                        <p class="muted">No reports uploaded yet.</p>
-                    </div>
                 </div>
                 <form class="upload-card" id="uploadForm">
                     <h3>Upload Inspection Report (PDF)</h3>
@@ -74,14 +71,24 @@
                     <button type="submit" class="btn primary">Upload Report</button>
                     <p id="uploadStatus" class="status"></p>
                 </form>
+                <div class="panel-text">
+                    <p class="step-label">Step 2</p>
+                    <h2>Inspection Documents</h2>
+                    <p>
+                        Select a report and click Use for Estimate to continue.
+                    </p>
+                    <div id="reportsList" class="report-list">
+                        <p class="muted">No reports uploaded yet.</p>
+                    </div>
+                </div>
             </section>
 
             <section id="estimate" class="panel" data-reveal>
                 <div class="panel-text">
-                    <h2>Automated Estimate</h2>
+                    <p class="step-label">Step 3</p>
+                    <h2>Estimate</h2>
                     <p>
-                        Select a report ID to trigger report extraction and separate critical
-                        repairs automatically.
+                        Review the estimate, adjust services, and download the PDF.
                     </p>
                     <form id="estimateForm" class="estimate-form">
                         <div class="field">

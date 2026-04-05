@@ -131,6 +131,14 @@ body::after {
     font-weight: 700;
 }
 
+.step-label {
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    font-size: 11px;
+    color: var(--primary);
+    font-weight: 700;
+}
+
 h1,
 h2,
 h3,
@@ -188,10 +196,26 @@ h1 {
     box-shadow: 0 18px 34px rgba(12, 60, 120, 0.32);
 }
 
+.btn.success {
+    background: #1f8f4e;
+    color: #fff;
+    box-shadow: 0 14px 28px rgba(31, 143, 78, 0.25);
+}
+
+.btn.success:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 34px rgba(31, 143, 78, 0.32);
+}
+
 .btn.ghost {
     background: transparent;
     border: 1px solid var(--primary);
     color: var(--primary);
+}
+
+.btn.large {
+    padding: 12px 24px;
+    font-size: 14px;
 }
 
 .hero-highlights {
@@ -278,6 +302,10 @@ main {
 
 .panel.steps {
     grid-template-columns: minmax(0, 1fr);
+}
+
+#documents.panel {
+    grid-template-columns: 1fr;
 }
 
 #estimate.panel {
