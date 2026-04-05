@@ -19,6 +19,7 @@ const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 let uploadInProgress = false;
 let suspendCleanup = false;
 let reportDownloadInProgress = false;
+let filePickerOpen = false;
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -309,7 +310,8 @@ if (uploadForm) {
             const file = (reportFile && reportFile.files && reportFile.files[0]) || selectedReportFile;
             if (!file) {
                 uploadStatus.textContent = "Select a PDF file to upload.";
-                if (reportFile) {
+                if (reportFile && !filePickerOpen) {
+                    filePickerOpen = true;
                     reportFile.click();
                 }
                 return;
@@ -326,6 +328,7 @@ if (reportFile) {
         reportFile.addEventListener("change", () => {
             selectedReportFile = reportFile.files[0] || null;
             updateDropzoneLabel(selectedReportFile);
+            filePickerOpen = false;
             if (selectedReportFile) {
                 handleUpload(selectedReportFile);
             }
@@ -337,7 +340,17 @@ if (dropzone) {
     if (!dropzone.dataset.bound) {
         dropzone.dataset.bound = "true";
         dropzone.addEventListener("click", (event) => {
-            if (reportFile && event.target !== reportFile) {
+            if (reportFile && event.target !== reportFile && !filePickerOpen) {
+                filePickerOpen = true;
+                reportFile.click();
+            }
+        });
+
+        dropzone.addEventListener("keydown", (event) => {
+            if (!reportFile || filePickerOpen) return;
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                filePickerOpen = true;
                 reportFile.click();
             }
         });
@@ -960,3 +973,6 @@ function sendSessionCleanup() {
 
 window.addEventListener("pagehide", sendSessionCleanup);
 window.addEventListener("beforeunload", sendSessionCleanup);
+window.addEventListener("focus", () => {
+    filePickerOpen = false;
+});
