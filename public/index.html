@@ -83,99 +83,20 @@
 
             <section id="estimate" class="panel" data-reveal>
                 <div class="panel-text">
-                    <h2>Estimate Request</h2>
+                    <h2>Automated Estimate</h2>
                     <p>
-                        Enter the property address and add a report ID to trigger AI
-                        extraction and separate critical repairs.
+                        Select a report ID to trigger AI extraction and separate critical
+                        repairs automatically.
                     </p>
                     <form id="estimateForm" class="estimate-form">
                         <div class="field">
-                            <label for="addressLine">Property Address</label>
-                            <input id="addressLine" name="addressLine" type="text" placeholder="123 Main St, Duluth GA"
-                                required />
-                        </div>
-                        <div class="field-row">
-                            <div class="field">
-                                <label for="city">City</label>
-                                <input id="city" name="city" type="text" placeholder="Duluth" />
-                            </div>
-                            <div class="field">
-                                <label for="state">State</label>
-                                <input id="state" name="state" type="text" placeholder="GA" maxlength="2" />
-                            </div>
-                            <div class="field">
-                                <label for="zip">Zip</label>
-                                <input id="zip" name="zip" type="text" placeholder="30096" />
-                            </div>
-                        </div>
-                        <div class="field-row">
-                            <div class="field">
-                                <label for="propertyType">Property Type</label>
-                                <select id="propertyType" name="propertyType">
-                                    <option>Single Family</option>
-                                    <option>Townhome</option>
-                                    <option>Condo</option>
-                                    <option>Multi-Family</option>
-                                </select>
-                            </div>
-                            <div class="field">
-                                <label for="reportId">Report ID (optional)</label>
-                                <input id="reportId" name="reportId" type="text"
-                                    placeholder="Report ID from Inspection Documents" />
-                                <p class="field-help">
-                                    Use the report ID to auto-detect repairs and critical items.
-                                </p>
-                            </div>
-                        </div>
-                        <div class="field">
-                            <label>Repair Areas</label>
-                            <div class="pill-grid">
-                                <label class="pill">
-                                    <input type="checkbox" name="repairAreas" value="roof" />
-                                    Roof
-                                </label>
-                                <label class="pill">
-                                    <input type="checkbox" name="repairAreas" value="plumbing" />
-                                    Plumbing
-                                </label>
-                                <label class="pill">
-                                    <input type="checkbox" name="repairAreas" value="electrical" />
-                                    Electrical
-                                </label>
-                                <label class="pill">
-                                    <input type="checkbox" name="repairAreas" value="drywall" />
-                                    Drywall
-                                </label>
-                                <label class="pill">
-                                    <input type="checkbox" name="repairAreas" value="paint" />
-                                    Paint
-                                </label>
-                                <label class="pill">
-                                    <input type="checkbox" name="repairAreas" value="flooring" />
-                                    Flooring
-                                </label>
-                                <label class="pill">
-                                    <input type="checkbox" name="repairAreas" value="hvac" />
-                                    HVAC
-                                </label>
-                                <label class="pill">
-                                    <input type="checkbox" name="repairAreas" value="windows" />
-                                    Windows
-                                </label>
-                                <label class="pill">
-                                    <input type="checkbox" name="repairAreas" value="foundation" />
-                                    Foundation
-                                </label>
-                                <label class="pill">
-                                    <input type="checkbox" name="repairAreas" value="exterior" />
-                                    Exterior
-                                </label>
-                            </div>
-                        </div>
-                        <div class="field">
-                            <label for="summary">Inspector Summary (optional)</label>
-                            <textarea id="summary" name="summary" rows="4"
-                                placeholder="Paste inspector notes or repair scope here."></textarea>
+                            <label for="reportId">Report ID (optional)</label>
+                            <input id="reportId" name="reportId" type="text"
+                                placeholder="Report ID from Inspection Documents" />
+                            <p class="field-help">
+                                Use the report ID to auto-detect repairs. Leave blank to use the
+                                latest uploaded report.
+                            </p>
                         </div>
                         <button type="submit" class="btn primary">Generate Estimate</button>
                         <p class="status" id="estimateStatus"></p>
@@ -205,13 +126,13 @@
                     </div>
                     <div class="step-card">
                         <span>02</span>
-                        <h3>Confirm Property Details</h3>
-                        <p>Address and repair areas inform regional pricing.</p>
+                        <h3>AI Reviews the Report</h3>
+                        <p>Critical repairs and recommended actions are extracted.</p>
                     </div>
                     <div class="step-card">
                         <span>03</span>
-                        <h3>Review Estimate</h3>
-                        <p>Receive a structured estimate ready for review.</p>
+                        <h3>Review the Estimate</h3>
+                        <p>Receive a structured estimate ready to share.</p>
                     </div>
                 </div>
             </section>

@@ -6,20 +6,20 @@ const multer = require("multer");
 const pdfParse = require("pdf-parse");
 const PDFDocument = require("pdfkit");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const crypto = require("crypto");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const TAX_RATE = 0.078;
 
-const uploadsDir = path.join(__dirname, "uploads");
-const REPORT_INDEX_PATH = path.join(uploadsDir, "report-index.json");
+const uploadsBaseDir = path.join(__dirname, "uploads");
 const PRICING_PATH = path.join(__dirname, "data", "pricing.json");
 const LOGO_PATH = path.join(__dirname, "public", "assets", "a-pro-handyman-llc.jpeg");
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
 const geminiClient = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir);
+if (!fs.existsSync(uploadsBaseDir)) {
+    fs.mkdirSync(uploadsBaseDir, { recursive: true });
 }
 
 const DEFAULT_PRICING = {
@@ -38,8 +38,57 @@ const DEFAULT_PRICING = {
 
 const PRICING = loadPricing();
 
+function parseCookies(header) {
+    const raw = String(header || "");
+    return raw.split(";").reduce((acc, part) => {
+        const [key, ...valueParts] = part.trim().split("=");
+        if (!key) {
+            return acc;
+        }
+        acc[key] = decodeURIComponent(valueParts.join("=") || "");
+        return acc;
+    }, {});
+}
+
+function sanitizeSessionId(value) {
+    return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+function createSessionId() {
+    if (crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+    return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function ensureSession(req, res) {
+    const cookies = parseCookies(req.headers.cookie || "");
+    let sessionId = sanitizeSessionId(cookies.realtor_session);
+
+    if (!sessionId) {
+        sessionId = createSessionId();
+        res.setHeader(
+            "Set-Cookie",
+            `realtor_session=${sessionId}; Path=/; SameSite=Lax; Max-Age=86400`
+        );
+    }
+
+    const sessionDir = path.join(uploadsBaseDir, sessionId);
+    if (!fs.existsSync(sessionDir)) {
+        fs.mkdirSync(sessionDir, { recursive: true });
+    }
+
+    return { sessionId, sessionDir };
+}
+
 const storage = multer.diskStorage({
-    destination: uploadsDir,
+    destination: (req, file, cb) => {
+        const sessionDir = req.sessionDir || uploadsBaseDir;
+        if (!fs.existsSync(sessionDir)) {
+            fs.mkdirSync(sessionDir, { recursive: true });
+        }
+        cb(null, sessionDir);
+    },
     filename: (req, file, cb) => {
         const safeName = file.originalname.replace(/[^a-zA-Z0-9_.-]/g, "_");
         const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -66,6 +115,12 @@ const upload = multer({
 });
 
 app.use(express.json({ limit: "1mb" }));
+app.use((req, res, next) => {
+    const { sessionId, sessionDir } = ensureSession(req, res);
+    req.sessionId = sessionId;
+    req.sessionDir = sessionDir;
+    next();
+});
 app.use(express.static(path.join(__dirname, "public")));
 
 app.post("/api/upload", upload.single("report"), (req, res) => {
@@ -73,7 +128,7 @@ app.post("/api/upload", upload.single("report"), (req, res) => {
         return res.status(400).json({ error: "No file uploaded." });
     }
 
-    const reportEntry = storeReportIndexEntry(req.file);
+    const reportEntry = storeReportIndexEntry(req.sessionDir, req.file);
 
     return res.json({
         ok: true,
@@ -83,10 +138,10 @@ app.post("/api/upload", upload.single("report"), (req, res) => {
 
 app.get("/api/reports", (req, res) => {
     try {
-        const index = loadReportIndex();
+        const index = loadReportIndex(req.sessionDir);
         const reports = index
             .map((entry) => {
-                const filePath = path.join(uploadsDir, entry.storedName);
+                const filePath = path.join(req.sessionDir, entry.storedName);
                 if (!fs.existsSync(filePath)) {
                     return null;
                 }
@@ -116,7 +171,7 @@ app.get("/api/reports/:file", (req, res) => {
         return res.status(400).json({ error: "Invalid file type." });
     }
 
-    const filePath = path.join(uploadsDir, safeName);
+    const filePath = path.join(req.sessionDir, safeName);
 
     if (!fs.existsSync(filePath)) {
         return res.status(404).json({ error: "File not found." });
@@ -127,13 +182,13 @@ app.get("/api/reports/:file", (req, res) => {
 
 app.get("/api/reports/download/:id", (req, res) => {
     const reportId = String(req.params.id || "").trim();
-    const entry = findReportEntry(reportId);
+    const entry = findReportEntry(req.sessionDir, reportId);
 
     if (!entry) {
         return res.status(404).json({ error: "Report not found." });
     }
 
-    const filePath = path.join(uploadsDir, entry.storedName);
+    const filePath = path.join(req.sessionDir, entry.storedName);
     if (!fs.existsSync(filePath)) {
         return res.status(404).json({ error: "File not found." });
     }
@@ -141,10 +196,27 @@ app.get("/api/reports/download/:id", (req, res) => {
     return res.download(filePath, entry.originalName || entry.storedName);
 });
 
+app.post("/api/session/cleanup", (req, res) => {
+    const sessionDir = req.sessionDir;
+    try {
+        if (sessionDir && fs.existsSync(sessionDir)) {
+            fs.rmSync(sessionDir, { recursive: true, force: true });
+        }
+    } catch (error) {
+        return res.status(500).json({ error: "Unable to clear session data." });
+    }
+
+    res.setHeader(
+        "Set-Cookie",
+        "realtor_session=; Path=/; Max-Age=0; SameSite=Lax"
+    );
+    return res.json({ ok: true });
+});
+
 app.post("/api/estimate", async (req, res) => {
     try {
         const payload = req.body || {};
-        const estimate = await buildEstimate(payload);
+        const estimate = await buildEstimate(payload, req.sessionDir);
         res.json(estimate);
     } catch (error) {
         res.status(500).json({ error: error.message || "Unable to generate estimate." });
@@ -245,16 +317,19 @@ const REPAIR_CATALOG = {
     general: { label: "General Repairs", material: 600, labor: 900 }
 };
 
-async function buildEstimate(payload) {
-    const location = resolveLocation(payload);
-    const regionProfile = getRegionProfile(location.state);
-    const requestedReport = payload.reportId ? findReportEntry(payload.reportId) : null;
-    const fallbackReport = !requestedReport && !payload.summary ? getLatestReportEntry() : null;
+async function buildEstimate(payload, sessionDir) {
+    const baseLocation = resolveLocation(payload);
+    const requestedReport = payload.reportId ? findReportEntry(sessionDir, payload.reportId) : null;
+    const fallbackReport = !requestedReport && !payload.summary
+        ? getLatestReportEntry(sessionDir)
+        : null;
     const reportEntry = requestedReport || fallbackReport;
     const hasAnalysisInput = Boolean(payload.summary || reportEntry);
     const analysis = hasAnalysisInput
-        ? await analyzeInspection({ reportEntry, summary: payload.summary, location })
+        ? await analyzeInspection({ reportEntry, summary: payload.summary, location: baseLocation, sessionDir })
         : buildEmptyAnalysis();
+    const location = mergeLocations(baseLocation, analysis.location);
+    const regionProfile = getRegionProfile(location.state);
 
     const lineItems = analysis.repairs.length > 0
         ? buildLineItemsFromRepairs(analysis.repairs, regionProfile)
@@ -282,6 +357,10 @@ async function buildEstimate(payload) {
         assumptions.push("Latest uploaded report used because no report ID was provided.");
     }
 
+    if (!location.addressLine || location.addressLine === "(Address pending)") {
+        assumptions.push("Property address not detected in the report.");
+    }
+
     return {
         estimateId: `EST-${Date.now()}`,
         createdAt: new Date().toISOString(),
@@ -306,9 +385,44 @@ async function buildEstimate(payload) {
     };
 }
 
-function getLatestReportEntry() {
-    const index = loadReportIndex();
+function getLatestReportEntry(sessionDir) {
+    const index = loadReportIndex(sessionDir);
     return index.length ? index[0] : null;
+}
+
+function mergeLocations(baseLocation, overrideLocation) {
+    const override = normalizeLocation(overrideLocation);
+    const base = normalizeLocation(baseLocation);
+    const addressLine = override.addressLine || base.addressLine || "(Address pending)";
+
+    return {
+        addressLine,
+        city: override.city || base.city || "",
+        state: override.state || base.state || "",
+        zip: override.zip || base.zip || ""
+    };
+}
+
+function normalizeLocation(location) {
+    if (!location) {
+        return { addressLine: "", city: "", state: "", zip: "" };
+    }
+
+    return {
+        addressLine: normalizeAddressValue(location.addressLine),
+        city: String(location.city || "").trim(),
+        state: String(location.state || "").trim().toUpperCase(),
+        zip: String(location.zip || "").trim()
+    };
+}
+
+function normalizeAddressValue(value) {
+    const normalized = String(value || "").trim();
+    if (!normalized || normalized === "(Address pending)") {
+        return "";
+    }
+
+    return normalized;
 }
 
 function buildEmptyAnalysis() {
@@ -318,6 +432,7 @@ function buildEmptyAnalysis() {
         criticalSummary: "",
         repairs: [],
         warnings: [],
+        location: null,
         reportId: "",
         reportName: ""
     };
@@ -406,14 +521,15 @@ function normalizeRepairKey(repair) {
     return "general_repair";
 }
 
-async function analyzeInspection({ reportEntry, summary, location }) {
+async function analyzeInspection({ reportEntry, summary, location, sessionDir }) {
     const analysis = buildEmptyAnalysis();
     const warnings = [];
     let pdfBuffer = null;
     let pdfText = "";
 
     if (reportEntry) {
-        const filePath = path.join(uploadsDir, reportEntry.storedName);
+        const activeDir = sessionDir || uploadsBaseDir;
+        const filePath = path.join(activeDir, reportEntry.storedName);
         if (fs.existsSync(filePath)) {
             pdfBuffer = fs.readFileSync(filePath);
             pdfText = await extractPdfText(pdfBuffer);
@@ -423,6 +539,11 @@ async function analyzeInspection({ reportEntry, summary, location }) {
     const combinedText = [summary, pdfText].filter(Boolean).join("\n").trim();
     let result = extractFindingsFromText(combinedText);
     let source = "heuristic";
+
+    const locationFromText = extractLocationFromText(combinedText);
+    if (locationFromText) {
+        result.location = locationFromText;
+    }
 
     if (!result.summary && combinedText) {
         result.summary = combinedText.slice(0, 240).trim();
@@ -435,6 +556,9 @@ async function analyzeInspection({ reportEntry, summary, location }) {
             location
         });
         if (aiResult && aiResult.repairs.length > 0) {
+            if (!aiResult.location && result.location) {
+                aiResult.location = result.location;
+            }
             result = aiResult;
             source = "gemini";
         }
@@ -459,6 +583,110 @@ async function extractPdfText(buffer) {
     } catch (error) {
         return "";
     }
+}
+
+function extractLocationFromText(text) {
+    if (!text) {
+        return null;
+    }
+
+    const lines = String(text)
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    let streetCandidate = "";
+
+    for (const rawLine of lines) {
+        const line = rawLine.replace(/\s+/g, " ").trim();
+        const labeledLine = line.replace(/^(property address|property|address|location)\s*[:#-]\s*/i, "");
+
+        const fullMatch = parseAddressFromLine(labeledLine) || parseAddressFromLine(line);
+        if (fullMatch) {
+            return fullMatch;
+        }
+
+        const cityStateZip =
+            parseCityStateZipFromLine(labeledLine) || parseCityStateZipFromLine(line);
+        if (cityStateZip) {
+            if (streetCandidate) {
+                return {
+                    addressLine: `${streetCandidate}, ${cityStateZip.city}, ${cityStateZip.state} ${cityStateZip.zip}`,
+                    city: cityStateZip.city,
+                    state: cityStateZip.state,
+                    zip: cityStateZip.zip
+                };
+            }
+
+            return {
+                addressLine: "",
+                city: cityStateZip.city,
+                state: cityStateZip.state,
+                zip: cityStateZip.zip
+            };
+        }
+
+        if (!streetCandidate) {
+            const streetOnly = parseStreetLine(labeledLine) || parseStreetLine(line);
+            if (streetOnly) {
+                streetCandidate = streetOnly;
+            }
+        }
+    }
+
+    return null;
+}
+
+function parseAddressFromLine(line) {
+    const addressRegex =
+        /^(\d{1,6}\s+[A-Za-z0-9.\-#'\s]+?),?\s+([A-Za-z.\-\s']+),?\s+([A-Z]{2})\s+(\d{5})(?:-\d{4})?$/i;
+    const match = String(line || "").trim().match(addressRegex);
+    if (!match) {
+        return null;
+    }
+
+    const street = match[1].trim();
+    const city = match[2].trim();
+    const state = match[3].trim().toUpperCase();
+    const zip = match[4].trim();
+
+    if (!STATE_CODES.has(state)) {
+        return null;
+    }
+
+    return {
+        addressLine: `${street}, ${city}, ${state} ${zip}`,
+        city,
+        state,
+        zip
+    };
+}
+
+function parseCityStateZipFromLine(line) {
+    const cityStateZipRegex = /([A-Za-z.\-\s']+),?\s+([A-Z]{2})\s+(\d{5})(?:-\d{4})?/i;
+    const match = String(line || "").trim().match(cityStateZipRegex);
+    if (!match) {
+        return null;
+    }
+
+    const state = match[2].trim().toUpperCase();
+    if (!STATE_CODES.has(state)) {
+        return null;
+    }
+
+    return {
+        city: match[1].trim(),
+        state,
+        zip: match[3].trim()
+    };
+}
+
+function parseStreetLine(line) {
+    const cleaned = String(line || "").trim();
+    if (!/^\d{1,6}\s+[A-Za-z0-9.\-#'\s]+$/.test(cleaned)) {
+        return "";
+    }
+
+    return cleaned;
 }
 
 function extractFindingsFromText(text) {
@@ -596,7 +824,8 @@ async function analyzeWithGemini({ buffer, summary, location }) {
         const prompt = [
             "You are a repair estimator.",
             "Read the inspector report and return ONLY JSON.",
-            "Schema: { summary: string, criticalSummary: string, repairs: [{ itemKey, issue, action, critical, parts }] }",
+            "Schema: { summary: string, criticalSummary: string, location: { addressLine, city, state, zip }, repairs: [{ itemKey, issue, action, critical, parts }] }",
+            "If the property address is present, fill location fields. Otherwise use empty strings.",
             "Allowed itemKey values: water_heater_replace, water_heater_repair, roof_leak, plumbing_leak, electrical_hazard, hvac_service, foundation_crack, general_repair.",
             "If the water heater is leaking, corroded, failed, or not working, use water_heater_replace.",
             "If the water heater needs a valve, thermostat, or relief part, use water_heater_repair.",
@@ -648,6 +877,12 @@ function normalizeGeminiResult(raw) {
         return null;
     }
 
+    const normalizedLocation = normalizeLocation(raw.location);
+    const hasLocation =
+        normalizedLocation.addressLine ||
+        normalizedLocation.city ||
+        normalizedLocation.state ||
+        normalizedLocation.zip;
     const repairs = raw.repairs.map((repair) => ({
         itemKey: normalizeRepairKey(repair),
         issue: String(repair.issue || "").trim(),
@@ -659,15 +894,18 @@ function normalizeGeminiResult(raw) {
     return {
         summary: String(raw.summary || "").trim(),
         criticalSummary: String(raw.criticalSummary || "").trim(),
-        repairs: dedupeRepairs(repairs)
+        repairs: dedupeRepairs(repairs),
+        location: hasLocation ? normalizedLocation : null
     };
 }
 
-function loadReportIndex() {
+function loadReportIndex(sessionDir) {
     try {
-        if (!fs.existsSync(REPORT_INDEX_PATH)) {
+        const activeDir = sessionDir || uploadsBaseDir;
+        const reportIndexPath = getReportIndexPath(activeDir);
+        if (!fs.existsSync(reportIndexPath)) {
             const files = fs
-                .readdirSync(uploadsDir)
+                .readdirSync(activeDir)
                 .filter((name) => name.toLowerCase().endsWith(".pdf"));
 
             if (files.length === 0) {
@@ -675,7 +913,7 @@ function loadReportIndex() {
             }
 
             const index = files.map((name) => {
-                const stats = fs.statSync(path.join(uploadsDir, name));
+                const stats = fs.statSync(path.join(activeDir, name));
                 return {
                     id: createReportId(),
                     storedName: name,
@@ -684,10 +922,10 @@ function loadReportIndex() {
                 };
             });
 
-            saveReportIndex(index);
+            saveReportIndex(activeDir, index);
             return index;
         }
-        const raw = fs.readFileSync(REPORT_INDEX_PATH, "utf8");
+        const raw = fs.readFileSync(reportIndexPath, "utf8");
         const parsed = JSON.parse(raw);
         return Array.isArray(parsed) ? parsed : [];
     } catch (error) {
@@ -695,8 +933,9 @@ function loadReportIndex() {
     }
 }
 
-function saveReportIndex(index) {
-    fs.writeFileSync(REPORT_INDEX_PATH, JSON.stringify(index, null, 2));
+function saveReportIndex(sessionDir, index) {
+    const reportIndexPath = getReportIndexPath(sessionDir);
+    fs.writeFileSync(reportIndexPath, JSON.stringify(index, null, 2));
 }
 
 function createReportId() {
@@ -704,8 +943,12 @@ function createReportId() {
     return `REP-${Date.now()}-${suffix}`;
 }
 
-function storeReportIndexEntry(file) {
-    const index = loadReportIndex();
+function getReportIndexPath(sessionDir) {
+    return path.join(sessionDir, "report-index.json");
+}
+
+function storeReportIndexEntry(sessionDir, file) {
+    const index = loadReportIndex(sessionDir);
     const entry = {
         id: createReportId(),
         storedName: file.filename,
@@ -714,14 +957,14 @@ function storeReportIndexEntry(file) {
     };
 
     index.unshift(entry);
-    saveReportIndex(index);
+    saveReportIndex(sessionDir, index);
     return entry;
 }
 
-function findReportEntry(reportId) {
+function findReportEntry(sessionDir, reportId) {
     if (!reportId) return null;
     const normalized = reportId.trim().toLowerCase();
-    const index = loadReportIndex();
+    const index = loadReportIndex(sessionDir);
 
     return (
         index.find((entry) => entry.id.toLowerCase() === normalized) ||
@@ -740,32 +983,58 @@ function generateEstimatePdf(estimate, res) {
     doc.pipe(res);
 
     const headerTop = doc.y;
-    let headerBottom = headerTop;
+    const leftX = doc.page.margins.left;
+    const rightX = doc.page.width - doc.page.margins.right;
+    const headerWidth = 200;
+    let headerHeight = 60;
+    let textStartX = leftX;
 
     if (fs.existsSync(LOGO_PATH)) {
-        const logoWidth = 140;
-        const logoHeight = 90;
-        doc.image(LOGO_PATH, doc.page.margins.left, headerTop, {
+        const logoWidth = 120;
+        const logoHeight = 80;
+        doc.image(LOGO_PATH, leftX, headerTop, {
             fit: [logoWidth, logoHeight]
         });
-        headerBottom = Math.max(headerBottom, headerTop + logoHeight);
+        textStartX = leftX + logoWidth + 12;
+        headerHeight = Math.max(headerHeight, logoHeight);
     }
 
-    doc.fontSize(20).text("Estimate", 0, headerTop, { align: "right" });
-    doc.fontSize(10).text(`Estimate ID: ${estimate.estimateId}`, { align: "right" });
-    headerBottom = Math.max(headerBottom, doc.y);
-    doc.y = headerBottom + 10;
+    doc.fontSize(18).text("Estimate", rightX - headerWidth, headerTop, {
+        width: headerWidth,
+        align: "right"
+    });
+    doc.fontSize(10).text(`Estimate ID: ${estimate.estimateId}`, rightX - headerWidth, headerTop + 22, {
+        width: headerWidth,
+        align: "right"
+    });
+    doc.fontSize(10).text(`Issued: ${formatDate(estimate.createdAt)}`, rightX - headerWidth, headerTop + 38, {
+        width: headerWidth,
+        align: "right"
+    });
 
-    doc.fontSize(12).text(estimate.company || "A PRO HANDYMAN LLC");
+    doc.fontSize(12).text(estimate.company || "A PRO HANDYMAN LLC", textStartX, headerTop);
+    let companyTextY = headerTop + 16;
     if (estimate.contractor) {
-        doc.fontSize(10).text(`Contractor: ${estimate.contractor}`);
+        doc.fontSize(10).text(`Contractor: ${estimate.contractor}`, textStartX, companyTextY);
+        companyTextY += 14;
     }
-    if (estimate.location && estimate.location.addressLine) {
-        doc.fontSize(10).text(`Property: ${estimate.location.addressLine}`);
+
+    const headerBottom = Math.max(headerTop + headerHeight, companyTextY + 4);
+    doc.y = headerBottom + 8;
+    doc.moveTo(leftX, doc.y).lineTo(rightX, doc.y).strokeColor("#d9d9d9").stroke();
+    doc.moveDown(0.6);
+
+    const propertyAddress =
+        estimate.location && estimate.location.addressLine && estimate.location.addressLine !== "(Address pending)"
+            ? estimate.location.addressLine
+            : "Address pending";
+    const cityStateZip = formatCityStateZip(estimate.location || {});
+
+    doc.fontSize(11).text("Property Details");
+    doc.fontSize(10).text(`Property Address: ${propertyAddress}`);
+    if (cityStateZip) {
+        doc.fontSize(10).text(`City/State/Zip: ${cityStateZip}`);
     }
-    doc.fontSize(10).text(
-        `Location: ${estimate.location.city || ""}, ${estimate.location.state || ""} ${estimate.location.zip || ""}`
-    );
     doc.moveDown();
 
     renderPdfSection(doc, "Critical Repairs", estimate.criticalItems || []);
@@ -823,6 +1092,30 @@ function formatCurrency(amount) {
     return currencyFormatter.format(Number(amount || 0));
 }
 
+function formatDate(value) {
+    if (!value) {
+        return "";
+    }
+
+    try {
+        return new Date(value).toLocaleDateString("en-US");
+    } catch (error) {
+        return "";
+    }
+}
+
+function formatCityStateZip(location) {
+    if (!location) {
+        return "";
+    }
+
+    const city = String(location.city || "").trim();
+    const state = String(location.state || "").trim();
+    const zip = String(location.zip || "").trim();
+    const cityState = city && state ? `${city}, ${state}` : city || state;
+    return [cityState, zip].filter(Boolean).join(" ");
+}
+
 function loadPricing() {
     try {
         if (!fs.existsSync(PRICING_PATH)) {
@@ -855,7 +1148,7 @@ function resolveLocation(payload) {
 
     const stateFromAddress = parseStateFromAddress(addressLine);
     const state = inputState || stateFromAddress || "GA";
-    const city = inputCity || parseCityFromAddress(addressLine, state) || "Duluth";
+    const city = inputCity || (addressLine ? parseCityFromAddress(addressLine, state) : "");
 
     return {
         addressLine: addressLine || "(Address pending)",
