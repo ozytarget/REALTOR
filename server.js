@@ -1074,6 +1074,18 @@ function generateEstimatePdf(estimate, res) {
     );
     doc.fontSize(11).text(`Grand Total: ${formatCurrency(estimate.totals.total)}`, contentX, doc.y, { width: contentWidth });
 
+    doc.moveDown();
+    doc.fontSize(11).text("Policy and Notes", contentX, doc.y, { width: contentWidth });
+    doc.fontSize(9);
+    [
+        "Pricing is valid for 15 days from the issued date.",
+        "Any additional work outside this scope requires written approval.",
+        "Repairs follow the listed items and approved scope.",
+        "Site conditions may require updates to the final scope."
+    ].forEach((line) => {
+        doc.text(`- ${line}`, contentX, doc.y, { width: contentWidth });
+    });
+
     if (estimate.analysis && estimate.analysis.summary) {
         doc.moveDown();
         doc.fontSize(11).text("Report Findings", contentX, doc.y, { width: contentWidth });

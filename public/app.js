@@ -518,6 +518,13 @@ function renderEstimate(estimate) {
                 ? warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")
                 : "";
 
+        const policyNotes = [
+            "Pricing is valid for 15 days from the issued date.",
+            "Any additional work outside this scope requires written approval.",
+            "Repairs follow the listed items and approved scope.",
+            "Site conditions may require updates to the final scope."
+        ];
+        const policyList = policyNotes.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
         const customTotalValue = currentEstimate.customTotal
                 ? formatAmountInput(currentEstimate.customTotal)
                 : "";
@@ -682,6 +689,10 @@ function renderEstimate(estimate) {
         <div class="total-row">
             <span>Grand Total</span>
             <span>${currencyFormatter.format(totals.total)}</span>
+        </div>
+        <div class="analysis-block">
+            <h4>Policy and Notes</h4>
+            <ul>${policyList}</ul>
         </div>
         <div class="analysis-block">
             <h4>Assumptions</h4>

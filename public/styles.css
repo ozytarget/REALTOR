@@ -57,9 +57,10 @@ body::after {
 }
 
 .page-shell {
-    width: min(1200px, 92vw);
+    width: 100%;
+    max-width: none;
     margin: 0 auto;
-    padding: 48px 0 64px;
+    padding: 48px 4vw 64px;
     display: flex;
     flex-direction: column;
     gap: 40px;
@@ -280,6 +281,19 @@ main {
     grid-template-columns: minmax(0, 1fr);
 }
 
+#estimate.panel {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "output" "text";
+}
+
+#estimate .estimate-output {
+    grid-area: output;
+}
+
+#estimate .panel-text {
+    grid-area: text;
+}
+
 .panel-text {
     display: grid;
     gap: 12px;
@@ -305,6 +319,12 @@ main {
     justify-content: space-between;
     align-items: center;
     gap: 12px;
+    flex-wrap: wrap;
+    overflow-wrap: anywhere;
+}
+
+.report-item > div {
+    min-width: 0;
 }
 
 .report-item a {
@@ -422,6 +442,7 @@ main {
     border: 1px solid var(--border);
     display: grid;
     gap: 12px;
+    overflow-wrap: anywhere;
 }
 
 .analysis-block {
@@ -430,6 +451,7 @@ main {
     padding: 12px;
     display: grid;
     gap: 8px;
+    overflow-wrap: anywhere;
 }
 
 .edit-input {
@@ -439,6 +461,7 @@ main {
     font-family: var(--font-sans);
     font-size: 13px;
     background: #fff;
+    width: 100%;
 }
 
 .edit-input.amount {
@@ -448,6 +471,7 @@ main {
 .edit-field {
     display: grid;
     gap: 6px;
+    min-width: 0;
 }
 
 .service-list {
@@ -517,6 +541,12 @@ main {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    flex-wrap: wrap;
+    overflow-wrap: anywhere;
+}
+
+.output-header > div {
+    min-width: 0;
 }
 
 .line-item {
@@ -524,6 +554,11 @@ main {
     grid-template-columns: 1.5fr 1fr;
     gap: 6px;
     font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+.line-item > div {
+    min-width: 0;
 }
 
 .line-item span {
