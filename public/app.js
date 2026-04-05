@@ -52,48 +52,89 @@ function roundCurrency(value) {
     return Math.round(value * 100) / 100;
 }
 
-function calculateTotals(estimate) {
-    const taxRate = Number(estimate.taxRate || 0);
-    const lineItems = Array.isArray(estimate.lineItems) ? estimate.lineItems : [];
-    const subtotalRaw = lineItems.reduce((sum, item) => sum + normalizeAmount(item.total), 0);
-
-    let subtotal = subtotalRaw;
-    let tax = subtotal * taxRate;
-    let total = subtotal + tax;
-    const customTotal = normalizeAmount(estimate.customTotal);
-
-    if (customTotal > 0) {
-        total = customTotal;
-        subtotal = total / (1 + taxRate);
-        tax = total - subtotal;
-    }
-
-    return {
-        subtotal: roundCurrency(subtotal),
-        tax: roundCurrency(tax),
-        total: roundCurrency(total)
-    };
-}
-
-function normalizeEstimate(estimate) {
-    const lineItems = Array.isArray(estimate.lineItems) ? estimate.lineItems : [];
-    const normalizedLineItems = lineItems.map((item) => {
+function normalizeLineItems(items) {
+    const lineItems = Array.isArray(items) ? items : [];
+    return lineItems.map((item) => {
         const fallbackTotal = Number(item.material || 0) + Number(item.labor || 0);
         return {
             ...item,
             description: item.description || "Line item",
             total: normalizeAmount(item.total || fallbackTotal),
+            material: Number.isFinite(Number(item.material)) ? Number(item.material) : 0,
+            labor: Number.isFinite(Number(item.labor)) ? Number(item.labor) : 0,
             critical: Boolean(item.critical)
         };
     });
+}
 
-    const criticalItems = normalizedLineItems.filter((item) => item.critical);
-    const additionalItems = normalizedLineItems.filter((item) => !item.critical);
-    const totals = calculateTotals({ ...estimate, lineItems: normalizedLineItems });
+function sumLineItems(items) {
+    return items.reduce((sum, item) => sum + normalizeAmount(item.total), 0);
+}
+
+function scaleLineItems(items, scale, targetSubtotal) {
+    if (!items.length) return [];
+
+    const scaledItems = items.map((item) => {
+        const material = item.material ? roundCurrency(item.material * scale) : 0;
+        const labor = item.labor ? roundCurrency(item.labor * scale) : 0;
+        const total = roundCurrency(item.total * scale);
+
+        return {
+            ...item,
+            material,
+            labor,
+            total
+        };
+    });
+
+    const subtotal = sumLineItems(scaledItems);
+    const diff = roundCurrency(targetSubtotal - subtotal);
+    if (scaledItems.length && Math.abs(diff) > 0) {
+        const lastIndex = scaledItems.length - 1;
+        scaledItems[lastIndex].total = roundCurrency(scaledItems[lastIndex].total + diff);
+    }
+
+    return scaledItems;
+}
+
+function calculateTotals(estimate) {
+    const taxRate = Number(estimate.taxRate || 0);
+    const lineItems = Array.isArray(estimate.lineItems) ? estimate.lineItems : [];
+    const subtotalRaw = sumLineItems(lineItems);
+    const subtotal = roundCurrency(subtotalRaw);
+    const tax = roundCurrency(subtotal * taxRate);
+    const total = roundCurrency(subtotal + tax);
+
+    return { subtotal, tax, total };
+}
+
+function normalizeEstimate(estimate) {
+    const baseLineItems = normalizeLineItems(estimate.baseLineItems || estimate.lineItems || []);
+    const customTotal = normalizeAmount(estimate.customTotal);
+    const taxRate = Number(estimate.taxRate || 0);
+    let adjustedLineItems = baseLineItems;
+
+    if (customTotal > 0) {
+        const targetSubtotal = roundCurrency(customTotal / (1 + taxRate));
+        const baseSubtotal = sumLineItems(baseLineItems);
+        const scale = baseSubtotal > 0 ? targetSubtotal / baseSubtotal : 1;
+        adjustedLineItems = scaleLineItems(baseLineItems, scale, targetSubtotal);
+    }
+
+    const criticalItems = adjustedLineItems.filter((item) => item.critical);
+    const additionalItems = adjustedLineItems.filter((item) => !item.critical);
+    const totals = customTotal > 0
+        ? {
+            subtotal: roundCurrency(customTotal / (1 + taxRate)),
+            tax: roundCurrency(customTotal - customTotal / (1 + taxRate)),
+            total: roundCurrency(customTotal)
+        }
+        : calculateTotals({ ...estimate, lineItems: adjustedLineItems });
 
     return {
         ...estimate,
-        lineItems: normalizedLineItems,
+        baseLineItems,
+        lineItems: adjustedLineItems,
         criticalItems,
         additionalItems,
         totals
@@ -294,15 +335,24 @@ if (estimateForm) {
 }
 
 function renderEstimate(estimate) {
-        const baseEstimate = {
-                ...estimate,
-                customTotal: typeof estimate.customTotal !== "undefined"
-                        ? estimate.customTotal
-                        : currentEstimate && typeof currentEstimate.customTotal !== "undefined"
-                                ? currentEstimate.customTotal
-                                : ""
-        };
-        currentEstimate = normalizeEstimate(baseEstimate);
+    const estimateIdChanged =
+        !currentEstimate || currentEstimate.estimateId !== estimate.estimateId;
+    const baseLineItems = estimateIdChanged
+        ? estimate.lineItems
+        : currentEstimate && currentEstimate.baseLineItems
+            ? currentEstimate.baseLineItems
+            : estimate.lineItems;
+
+    const baseEstimate = {
+        ...estimate,
+        baseLineItems,
+        customTotal: typeof estimate.customTotal !== "undefined"
+            ? estimate.customTotal
+            : currentEstimate && typeof currentEstimate.customTotal !== "undefined"
+                ? currentEstimate.customTotal
+                : ""
+    };
+    currentEstimate = normalizeEstimate(baseEstimate);
 
         const { lineItems, criticalItems, additionalItems, totals, analysis } = currentEstimate;
         const hasSplitItems = criticalItems.length > 0 || additionalItems.length > 0;
@@ -363,8 +413,8 @@ function renderEstimate(estimate) {
                 ? formatAmountInput(currentEstimate.customTotal)
                 : "";
         const customTotalNote = currentEstimate.customTotal
-                ? "<p class=\"muted\">Custom total applied. Line items remain AI-generated.</p>"
-                : "<p class=\"muted\">Optional. Overrides the total while keeping AI line items.</p>";
+            ? "<p class=\"muted\">Custom total applied. Line items adjusted proportionally.</p>"
+            : "<p class=\"muted\">Optional. Adjusts the total and scales line items.</p>";
 
         estimateResult.innerHTML = `
         <div class="output-header">
