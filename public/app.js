@@ -8,6 +8,7 @@ const estimateForm = document.getElementById("estimateForm");
 const estimateStatus = document.getElementById("estimateStatus");
 const estimateResult = document.getElementById("estimateResult");
 const reportIdInput = document.getElementById("reportId");
+const downloadPdfButton = document.getElementById("downloadPdf");
 const uploadButton = uploadForm
     ? uploadForm.querySelector("button[type=\"submit\"]")
     : null;
@@ -18,7 +19,6 @@ const MAX_UPLOAD_MB = 50;
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 let uploadInProgress = false;
 let suspendCleanup = false;
-let reportDownloadInProgress = false;
 let filePickerOpen = false;
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
@@ -263,9 +263,8 @@ async function loadReports() {
                     new Date(report.uploadedAt).toLocaleDateString("en-US")
                 );
                 const size = formatSize(report.size);
-                const downloadUrl = report.downloadUrl || report.url || "";
 
-                                return `
+                return `
           <div class="report-item">
             <div>
               <strong>${name}</strong>
@@ -282,6 +281,15 @@ async function loadReports() {
               >
                                 Use for Estimate
               </button>
+                                                        <button
+                                type="button"
+                                class="btn danger small"
+                                data-action="delete"
+                                data-report-id="${reportId}"
+                                data-report-name="${name}"
+                            >
+                                                                Delete
+                            </button>
             </div>
           </div>
         `;
@@ -383,20 +391,30 @@ if (reportsList) {
     if (!reportsList.dataset.bound) {
         reportsList.dataset.bound = "true";
         reportsList.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-action=\"estimate\"]");
-    if (!target) return;
+            const deleteButton = event.target.closest("[data-action=\"delete\"]");
+            if (deleteButton) {
+                event.preventDefault();
+                event.stopPropagation();
+                const reportId = deleteButton.getAttribute("data-report-id") || "";
+                const reportName = deleteButton.getAttribute("data-report-name") || "";
+                deleteReport(reportId, reportName);
+                return;
+            }
 
-    event.preventDefault();
-    event.stopPropagation();
-    const reportId = target.getAttribute("data-report-id") || "";
-    const reportName = target.getAttribute("data-report-name") || "";
-    reportIdInput.value = reportId;
-    estimateStatus.textContent = reportName
-        ? `Report selected: ${reportName}`
-        : "Report selected.";
+            const target = event.target.closest("[data-action=\"estimate\"]");
+            if (!target) return;
 
-    document.getElementById("estimate").scrollIntoView({ behavior: "smooth" });
-    requestEstimate(reportId);
+            event.preventDefault();
+            event.stopPropagation();
+            const reportId = target.getAttribute("data-report-id") || "";
+            const reportName = target.getAttribute("data-report-name") || "";
+            reportIdInput.value = reportId;
+            estimateStatus.textContent = reportName
+                ? `Report selected: ${reportName}`
+                : "Report selected.";
+
+            document.getElementById("estimate").scrollIntoView({ behavior: "smooth" });
+            requestEstimate(reportId);
         });
     }
 }
@@ -409,6 +427,11 @@ if (estimateForm) {
             requestEstimate();
         });
     }
+}
+
+if (downloadPdfButton && !downloadPdfButton.dataset.bound) {
+    downloadPdfButton.dataset.bound = "true";
+    downloadPdfButton.addEventListener("click", () => downloadEstimatePdf(currentEstimate));
 }
 
 function renderEstimate(estimate) {
@@ -443,44 +466,44 @@ function renderEstimate(estimate) {
     };
     currentEstimate = normalizeEstimate(baseEstimate);
 
-        const { lineItems, criticalItems, additionalItems, totals, analysis } = currentEstimate;
-        const hasSplitItems = criticalItems.length > 0 || additionalItems.length > 0;
-        const warnings = Array.isArray(analysis.warnings) ? analysis.warnings : [];
-        const analysisSourceLabelMap = {
-            gemini: "Automated",
-            heuristic: "Rule-based",
-            manual: "Manual"
-        };
-        const analysisSourceLabel = analysisSourceLabelMap[analysis.source] || "Manual";
-        const location = currentEstimate.location || {};
-        const addressLineValue = location.addressLine && location.addressLine !== "(Address pending)"
-            ? location.addressLine
-            : "";
-        const addressLine = addressLineValue || "Address pending";
-        const cityValue = location.city || "";
-        const stateValue = location.state || "";
-        const zipValue = location.zip || "";
-        const estimateIdValue = currentEstimate.estimateId || "";
-        const cityStateZip = [
-                location.city && location.state ? `${location.city}, ${location.state}` : location.city || location.state,
-                location.zip
-        ]
-                .filter(Boolean)
-                .join(" ");
+    const { lineItems, criticalItems, additionalItems, totals, analysis } = currentEstimate;
+    const hasSplitItems = criticalItems.length > 0 || additionalItems.length > 0;
+    const warnings = Array.isArray(analysis.warnings) ? analysis.warnings : [];
+    const analysisSourceLabelMap = {
+        gemini: "Automated",
+        heuristic: "Rule-based",
+        manual: "Manual"
+    };
+    const analysisSourceLabel = analysisSourceLabelMap[analysis.source] || "Manual";
+    const location = currentEstimate.location || {};
+    const addressLineValue = location.addressLine && location.addressLine !== "(Address pending)"
+        ? location.addressLine
+        : "";
+    const addressLine = addressLineValue || "Address pending";
+    const cityValue = location.city || "";
+    const stateValue = location.state || "";
+    const zipValue = location.zip || "";
+    const estimateIdValue = currentEstimate.estimateId || "";
+    const cityStateZip = [
+        location.city && location.state ? `${location.city}, ${location.state}` : location.city || location.state,
+        location.zip
+    ]
+        .filter(Boolean)
+        .join(" ");
 
-        const renderItems = (items, emptyText) => {
-                if (!items.length) {
-                        return `<p class="muted">${emptyText}</p>`;
-                }
+    const renderItems = (items, emptyText) => {
+        if (!items.length) {
+            return `<p class="muted">${emptyText}</p>`;
+        }
 
-                return items
-                        .map((item) => {
-                                const description = escapeHtml(item.description);
-                                const notes = item.notes ? `<div class="muted">${escapeHtml(item.notes)}</div>` : "";
-                                const parts = Array.isArray(item.parts) && item.parts.length > 0
-                                        ? `<div class="muted">Parts: ${escapeHtml(item.parts.join(", "))}</div>`
-                                        : "";
-                                return `
+        return items
+            .map((item) => {
+                const description = escapeHtml(item.description);
+                const notes = item.notes ? `<div class="muted">${escapeHtml(item.notes)}</div>` : "";
+                const parts = Array.isArray(item.parts) && item.parts.length > 0
+                    ? `<div class="muted">Parts: ${escapeHtml(item.parts.join(", "))}</div>`
+                    : "";
+                return `
                     <div class="line-item">
                         <div>
                             <strong>${description}</strong>
@@ -491,50 +514,50 @@ function renderEstimate(estimate) {
                         <div>${currencyFormatter.format(item.total)}</div>
                     </div>
                 `;
-                        })
-                        .join("");
-        };
+            })
+            .join("");
+    };
 
-        const assumptions = (currentEstimate.assumptions || [])
-                .map((item) => `<li>${escapeHtml(item)}</li>`)
-                .join("");
+    const assumptions = (currentEstimate.assumptions || [])
+        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .join("");
 
-        const repairsList = Array.isArray(analysis.repairs) && analysis.repairs.length
-                ? analysis.repairs
-                        .map((repair) => `<li>${escapeHtml(repair.issue || repair.itemKey || "Repair")}</li>`)
-                        .join("")
-                : "";
+    const repairsList = Array.isArray(analysis.repairs) && analysis.repairs.length
+        ? analysis.repairs
+            .map((repair) => `<li>${escapeHtml(repair.issue || repair.itemKey || "Repair")}</li>`)
+            .join("")
+        : "";
 
-        const warningList = warnings.length
-                ? warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")
-                : "";
+    const warningList = warnings.length
+        ? warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")
+        : "";
 
-        const policyNotes = [
-            "Pricing is valid for 15 days from the issued date.",
-            "Any additional work outside this scope requires written approval.",
-            "Repairs follow the listed items and approved scope.",
-            "Site conditions may require updates to the final scope."
-        ];
-        const policyList = policyNotes.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
-        const customTotalValue = currentEstimate.customTotal
-                ? formatAmountInput(currentEstimate.customTotal)
-                : "";
-        const customTotalNote = currentEstimate.customTotal
-            ? "<p class=\"muted\">Custom total applied. Line items adjusted proportionally.</p>"
-            : "<p class=\"muted\">Optional. Adjusts the total and scales line items.</p>";
-        const serviceItems = [
-            ...(currentEstimate.baseLineItems || []),
-            ...(currentEstimate.customItems || [])
-        ];
-        const serviceRows = serviceItems.length
-            ? serviceItems.map((item) => {
-                    const rowId = item.rowId;
-                    const isExcluded = currentEstimate.excludedRowIds.includes(rowId);
-                    const label = isExcluded ? "Restore" : "Remove";
-                    const status = isExcluded ? "Excluded" : "Included";
-                    const rowClass = isExcluded ? "service-row is-excluded" : "service-row";
-                                const sourceLabel = item.source === "custom" ? "Custom" : "System";
-                    return `
+    const policyNotes = [
+        "Pricing is valid for 15 days from the issued date.",
+        "Any additional work outside this scope requires written approval.",
+        "Repairs follow the listed items and approved scope.",
+        "Site conditions may require updates to the final scope."
+    ];
+    const policyList = policyNotes.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+    const customTotalValue = currentEstimate.customTotal
+        ? formatAmountInput(currentEstimate.customTotal)
+        : "";
+    const customTotalNote = currentEstimate.customTotal
+        ? "<p class=\"muted\">Custom total applied. Line items adjusted proportionally.</p>"
+        : "<p class=\"muted\">Optional. Adjusts the total and scales line items.</p>";
+    const serviceItems = [
+        ...(currentEstimate.baseLineItems || []),
+        ...(currentEstimate.customItems || [])
+    ];
+    const serviceRows = serviceItems.length
+        ? serviceItems.map((item) => {
+            const rowId = item.rowId;
+            const isExcluded = currentEstimate.excludedRowIds.includes(rowId);
+            const label = isExcluded ? "Restore" : "Remove";
+            const status = isExcluded ? "Excluded" : "Included";
+            const rowClass = isExcluded ? "service-row is-excluded" : "service-row";
+            const sourceLabel = item.source === "custom" ? "Custom" : "System";
+            return `
                 <div class="${rowClass}">
                 <div>
                     <strong>${escapeHtml(item.description)}</strong>
@@ -549,10 +572,10 @@ function renderEstimate(estimate) {
                 </button>
                 </div>
             `;
-                }).join("")
-            : "<p class=\"muted\">No services found.</p>";
+        }).join("")
+        : "<p class=\"muted\">No services found.</p>";
 
-        estimateResult.innerHTML = `
+    estimateResult.innerHTML = `
         <div class="output-header">
             <div>
                 <h3>Estimate ${escapeHtml(currentEstimate.estimateId)}</h3>
@@ -690,14 +713,10 @@ function renderEstimate(estimate) {
             <h4>Assumptions</h4>
             <ul>${assumptions}</ul>
         </div>
-        <div class="output-actions">
-            <button class="btn ghost" id="downloadPdf">Download Estimate PDF</button>
-        </div>
     `;
 
-    const downloadButton = document.getElementById("downloadPdf");
-    if (downloadButton) {
-        downloadButton.addEventListener("click", () => downloadEstimatePdf(currentEstimate));
+    if (downloadPdfButton) {
+        downloadPdfButton.disabled = false;
     }
 }
 
@@ -740,42 +759,41 @@ async function downloadEstimatePdf(estimate) {
     }
 }
 
-async function downloadReport(url, name) {
-    if (!url) return;
-    if (reportDownloadInProgress) return;
-    reportDownloadInProgress = true;
-    uploadStatus.textContent = "Preparing download...";
-    suspendCleanup = true;
+async function deleteReport(reportId, reportName) {
+    if (!reportId) return;
+    const label = reportName ? `"${reportName}"` : "this report";
+    const confirmed = window.confirm(`Delete ${label}? This cannot be undone.`);
+    if (!confirmed) return;
+
+    uploadStatus.textContent = "Deleting report...";
 
     try {
-        const response = await fetch(url);
+        const response = await fetch(`/api/reports/${encodeURIComponent(reportId)}`, {
+            method: "DELETE"
+        });
+
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || "Unable to download report.");
+            throw new Error(errorData.error || "Unable to delete report.");
         }
 
-        const blob = await response.blob();
-        const fileName = name.toLowerCase().endsWith(".pdf") ? name : `${name}.pdf`;
-        const downloadUrl = window.URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = downloadUrl;
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(downloadUrl);
-        uploadStatus.textContent = "Report downloaded.";
+        if (reportIdInput && reportIdInput.value === reportId) {
+            reportIdInput.value = "";
+            estimateStatus.textContent = "Report deleted. Select another report.";
+        }
+
+        uploadStatus.textContent = "Report deleted.";
+        await loadReports();
     } catch (error) {
-        uploadStatus.textContent = error.message || "Download failed.";
-    } finally {
-        reportDownloadInProgress = false;
-        setTimeout(() => {
-            suspendCleanup = false;
-        }, 1500);
+        uploadStatus.textContent = error.message || "Delete failed.";
     }
 }
 
 async function requestEstimate(reportIdOverride) {
+    const hadEstimate = Boolean(currentEstimate);
+    if (downloadPdfButton) {
+        downloadPdfButton.disabled = true;
+    }
     const reportIdValue = typeof reportIdOverride === "string"
         ? reportIdOverride
         : document.getElementById("reportId").value.trim();
@@ -805,6 +823,9 @@ async function requestEstimate(reportIdOverride) {
         estimateStatus.textContent = "Estimate ready.";
     } catch (error) {
         estimateStatus.textContent = error.message;
+        if (downloadPdfButton) {
+            downloadPdfButton.disabled = !hadEstimate;
+        }
     }
 }
 
@@ -940,7 +961,7 @@ function sendSessionCleanup() {
     fetch("/api/session/cleanup", {
         method: "POST",
         keepalive: true
-    }).catch(() => {});
+    }).catch(() => { });
 }
 
 window.addEventListener("pagehide", sendSessionCleanup);

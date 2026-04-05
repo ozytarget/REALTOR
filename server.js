@@ -196,6 +196,30 @@ app.get("/api/reports/download/:id", (req, res) => {
     return res.download(filePath, entry.originalName || entry.storedName);
 });
 
+app.delete("/api/reports/:id", (req, res) => {
+    try {
+        const reportId = String(req.params.id || "").trim();
+        const entry = findReportEntry(req.sessionDir, reportId);
+
+        if (!entry) {
+            return res.status(404).json({ error: "Report not found." });
+        }
+
+        const index = loadReportIndex(req.sessionDir);
+        const updatedIndex = index.filter((item) => item.id !== entry.id);
+        saveReportIndex(req.sessionDir, updatedIndex);
+
+        const filePath = path.join(req.sessionDir, entry.storedName);
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+
+        return res.json({ ok: true });
+    } catch (error) {
+        return res.status(500).json({ error: "Unable to delete report." });
+    }
+});
+
 app.post("/api/session/cleanup", (req, res) => {
     const sessionDir = req.sessionDir;
     try {
@@ -320,7 +344,10 @@ const REPAIR_CATALOG = {
 async function buildEstimate(payload, sessionDir) {
     const baseLocation = resolveLocation(payload);
     const requestedReport = payload.reportId ? findReportEntry(sessionDir, payload.reportId) : null;
-    const fallbackReport = !requestedReport && !payload.summary
+    if (payload.reportId && !requestedReport) {
+        throw new Error("Report ID not found.");
+    }
+    const fallbackReport = !payload.reportId && !payload.summary
         ? getLatestReportEntry(sessionDir)
         : null;
     const reportEntry = requestedReport || fallbackReport;
@@ -693,27 +720,36 @@ function extractFindingsFromText(text) {
         return { repairs: [], summary: "", criticalSummary: "" };
     }
 
-    const hasWaterHeater = /water\s*heater|waterheater/.test(lower);
-    if (hasWaterHeater) {
-        const replaceIndicators = [
-            "replace",
-            "replacement",
-            "leak",
-            "corrosion",
-            "rust",
-            "failed",
-            "not working"
-        ];
-        const repairIndicators = [
-            "valve",
-            "thermostat",
-            "pressure relief",
-            "pilot",
-            "element"
-        ];
+    const lines = String(text || "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
 
-        const shouldReplace = replaceIndicators.some((word) => lower.includes(word));
-        const canRepair = repairIndicators.some((word) => lower.includes(word));
+    const hasIssueForSystem = (systemRegex, issueRegex) => {
+        if (!systemRegex || !issueRegex) {
+            return false;
+        }
+
+        const matchLine = lines.some((line) => systemRegex.test(line) && issueRegex.test(line));
+        if (matchLine) {
+            return true;
+        }
+
+        const systemSource = systemRegex.source;
+        const issueSource = issueRegex.source;
+        const nearForward = new RegExp(`(?:${systemSource})[\s\S]{0,80}(?:${issueSource})`, "i");
+        const nearBackward = new RegExp(`(?:${issueSource})[\s\S]{0,80}(?:${systemSource})`, "i");
+
+        return nearForward.test(lower) || nearBackward.test(lower);
+    };
+
+    const waterHeaterRegex = /water\s*heater|waterheater/i;
+    const waterHeaterIssueRegex = /(replace|replacement|leak|corrosion|rust|failed|not working|valve|thermostat|pressure relief|pilot|element)/i;
+    if (hasIssueForSystem(waterHeaterRegex, waterHeaterIssueRegex)) {
+        const replaceRegex = /(water\s*heater|waterheater)[\s\S]{0,80}(replace|replacement|leak|corrosion|rust|failed|not working)/i;
+        const repairRegex = /(water\s*heater|waterheater)[\s\S]{0,80}(valve|thermostat|pressure relief|pilot|element)/i;
+        const shouldReplace = replaceRegex.test(lower);
+        const canRepair = repairRegex.test(lower);
         const action = shouldReplace || !canRepair ? "replace" : "repair";
 
         repairs.push({
@@ -721,7 +757,7 @@ function extractFindingsFromText(text) {
             system: "water heater",
             action,
             issue: "Water heater requires attention.",
-            critical: action === "replace" || lower.includes("leak")
+            critical: action === "replace" || /leak|leaking/.test(lower)
         });
 
         summaryParts.push("Water heater issue detected.");
@@ -730,7 +766,9 @@ function extractFindingsFromText(text) {
         }
     }
 
-    if (lower.includes("roof") && /(leak|damage|missing|shingle)/.test(lower)) {
+    const roofRegex = /roof/i;
+    const roofIssueRegex = /(leak|damage|damaged|missing|defect|deterior|problem|repair|replace)/i;
+    if (hasIssueForSystem(roofRegex, roofIssueRegex)) {
         repairs.push({
             itemKey: "roof_leak",
             system: "roof",
@@ -742,18 +780,22 @@ function extractFindingsFromText(text) {
         criticalParts.push("Roof leak requires attention.");
     }
 
-    if (/plumb|pipe|leak/.test(lower)) {
+    const plumbingRegex = /plumb|pipe|water line|supply line|drain/i;
+    const plumbingIssueRegex = /(leak|burst|corrosion|rust|damage|damaged|defect|problem|repair|replace|clog|backup)/i;
+    if (hasIssueForSystem(plumbingRegex, plumbingIssueRegex)) {
         repairs.push({
             itemKey: "plumbing_leak",
             system: "plumbing",
             action: "repair",
             issue: "Plumbing leak reported.",
-            critical: lower.includes("leak")
+            critical: /leak|burst/.test(lower)
         });
         summaryParts.push("Plumbing issue detected.");
     }
 
-    if (/electrical|panel|wiring/.test(lower) && /(hazard|unsafe|overheat|exposed)/.test(lower)) {
+    const electricalRegex = /electrical|panel|wiring|outlet|breaker/i;
+    const electricalIssueRegex = /(hazard|unsafe|overheat|exposed|defect|problem|repair|replace|arc|burn)/i;
+    if (hasIssueForSystem(electricalRegex, electricalIssueRegex)) {
         repairs.push({
             itemKey: "electrical_hazard",
             system: "electrical",
@@ -765,7 +807,9 @@ function extractFindingsFromText(text) {
         criticalParts.push("Electrical hazard requires attention.");
     }
 
-    if (/hvac|air condition|ac unit|furnace/.test(lower)) {
+    const hvacRegex = /hvac|air condition|ac unit|furnace|heat pump/i;
+    const hvacIssueRegex = /(repair|replace|not working|not cooling|not heating|problem|defect|leak|failure|service needed|recommend)/i;
+    if (hasIssueForSystem(hvacRegex, hvacIssueRegex)) {
         repairs.push({
             itemKey: "hvac_service",
             system: "hvac",
@@ -776,7 +820,9 @@ function extractFindingsFromText(text) {
         summaryParts.push("HVAC issue detected.");
     }
 
-    if (/foundation|settlement|crack/.test(lower)) {
+    const foundationRegex = /foundation|settlement|crack/i;
+    const foundationIssueRegex = /(crack|settlement|movement|defect|problem|repair|damage|damaged)/i;
+    if (hasIssueForSystem(foundationRegex, foundationIssueRegex)) {
         repairs.push({
             itemKey: "foundation_crack",
             system: "foundation",
