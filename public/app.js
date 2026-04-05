@@ -18,6 +18,7 @@ const MAX_UPLOAD_MB = 50;
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 let uploadInProgress = false;
 let suspendCleanup = false;
+let reportDownloadInProgress = false;
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -274,6 +275,7 @@ async function loadReports() {
                             <button
                 type="button"
                 class="btn ghost small"
+                data-action="estimate"
                 data-report-id="${reportId}"
                 data-report-name="${name}"
               >
@@ -282,6 +284,7 @@ async function loadReports() {
                                                         <button
                                                                 type="button"
                                                                 class="btn ghost small"
+                                        data-action="download"
                                                                 data-download-url="${downloadUrl}"
                                                                 data-download-name="${name}"
                                                         >
@@ -298,84 +301,108 @@ async function loadReports() {
 }
 
 if (uploadForm) {
-    uploadForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
+    if (!uploadForm.dataset.bound) {
+        uploadForm.dataset.bound = "true";
+        uploadForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
 
-    const file = (reportFile && reportFile.files && reportFile.files[0]) || selectedReportFile;
-    if (!file) {
-        uploadStatus.textContent = "Select a PDF file to upload.";
-        if (reportFile) {
-            reportFile.click();
-        }
-        return;
+            const file = (reportFile && reportFile.files && reportFile.files[0]) || selectedReportFile;
+            if (!file) {
+                uploadStatus.textContent = "Select a PDF file to upload.";
+                if (reportFile) {
+                    reportFile.click();
+                }
+                return;
+            }
+
+            await handleUpload(file);
+        });
     }
-
-    await handleUpload(file);
-    });
 }
 
 if (reportFile) {
-    reportFile.addEventListener("change", () => {
-        selectedReportFile = reportFile.files[0] || null;
-        updateDropzoneLabel(selectedReportFile);
-        if (selectedReportFile) {
-            handleUpload(selectedReportFile);
-        }
-    });
+    if (!reportFile.dataset.bound) {
+        reportFile.dataset.bound = "true";
+        reportFile.addEventListener("change", () => {
+            selectedReportFile = reportFile.files[0] || null;
+            updateDropzoneLabel(selectedReportFile);
+            if (selectedReportFile) {
+                handleUpload(selectedReportFile);
+            }
+        });
+    }
 }
 
 if (dropzone) {
-    dropzone.addEventListener("click", (event) => {
-        if (reportFile && event.target !== reportFile) {
-            reportFile.click();
-        }
-    });
-
-    ["dragenter", "dragover"].forEach((eventName) => {
-        dropzone.addEventListener(eventName, (event) => {
-            event.preventDefault();
-            dropzone.classList.add("dragover");
+    if (!dropzone.dataset.bound) {
+        dropzone.dataset.bound = "true";
+        dropzone.addEventListener("click", (event) => {
+            if (reportFile && event.target !== reportFile) {
+                reportFile.click();
+            }
         });
-    });
 
-    ["dragleave", "drop"].forEach((eventName) => {
-        dropzone.addEventListener(eventName, (event) => {
-            event.preventDefault();
-            dropzone.classList.remove("dragover");
+        ["dragenter", "dragover"].forEach((eventName) => {
+            dropzone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                dropzone.classList.add("dragover");
+            });
         });
-    });
 
-    dropzone.addEventListener("drop", (event) => {
-        const files = event.dataTransfer ? event.dataTransfer.files : null;
-        if (!files || !files.length) return;
-        selectedReportFile = files[0];
+        ["dragleave", "drop"].forEach((eventName) => {
+            dropzone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                dropzone.classList.remove("dragover");
+            });
+        });
 
-        if (reportFile && window.DataTransfer) {
-            const dataTransfer = new DataTransfer();
-            dataTransfer.items.add(selectedReportFile);
-            reportFile.files = dataTransfer.files;
-        }
+        dropzone.addEventListener("drop", (event) => {
+            const files = event.dataTransfer ? event.dataTransfer.files : null;
+            if (!files || !files.length) return;
+            selectedReportFile = files[0];
 
-        updateDropzoneLabel(selectedReportFile);
-        if (selectedReportFile) {
-            handleUpload(selectedReportFile);
-        }
-    });
+            if (reportFile && window.DataTransfer) {
+                const dataTransfer = new DataTransfer();
+                dataTransfer.items.add(selectedReportFile);
+                reportFile.files = dataTransfer.files;
+            }
+
+            updateDropzoneLabel(selectedReportFile);
+            if (selectedReportFile) {
+                handleUpload(selectedReportFile);
+            }
+        });
+    }
 }
 
 if (reportsList) {
-    reportsList.addEventListener("click", (event) => {
-    const downloadButton = event.target.closest("[data-download-url]");
+    if (!reportsList.dataset.bound) {
+        reportsList.dataset.bound = "true";
+        reportsList.addEventListener("click", (event) => {
+    const downloadButton = event.target.closest("[data-action=\"download\"]");
     if (downloadButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (downloadButton.dataset.downloading === "true") {
+            return;
+        }
         const url = downloadButton.getAttribute("data-download-url") || "";
         const name = downloadButton.getAttribute("data-download-name") || "report.pdf";
-        downloadReport(url, name);
+        downloadButton.dataset.downloading = "true";
+        downloadButton.disabled = true;
+        downloadReport(url, name)
+            .finally(() => {
+                downloadButton.disabled = false;
+                downloadButton.dataset.downloading = "false";
+            });
         return;
     }
 
-    const target = event.target.closest("[data-report-id]");
+    const target = event.target.closest("[data-action=\"estimate\"]");
     if (!target) return;
 
+    event.preventDefault();
+    event.stopPropagation();
     const reportId = target.getAttribute("data-report-id") || "";
     const reportName = target.getAttribute("data-report-name") || "";
     reportIdInput.value = reportId;
@@ -384,40 +411,19 @@ if (reportsList) {
         : "Report selected.";
 
     document.getElementById("estimate").scrollIntoView({ behavior: "smooth" });
-    });
+    requestEstimate(reportId);
+        });
+    }
 }
 
 if (estimateForm) {
-    estimateForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-
-    const payload = {
-        reportId: document.getElementById("reportId").value.trim()
-    };
-
-    estimateStatus.textContent = "Generating estimate...";
-
-    try {
-        const response = await fetch("/api/estimate", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(payload)
+    if (!estimateForm.dataset.bound) {
+        estimateForm.dataset.bound = "true";
+        estimateForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            requestEstimate();
         });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || "Unable to generate estimate.");
-        }
-
-        const estimate = await response.json();
-        renderEstimate(estimate);
-        estimateStatus.textContent = "Estimate ready.";
-    } catch (error) {
-        estimateStatus.textContent = error.message;
     }
-    });
 }
 
 function renderEstimate(estimate) {
@@ -675,6 +681,7 @@ function renderEstimate(estimate) {
                     type="text"
                     value="${customTotalValue}"
                 />
+                <p class="muted warning-text">Avoid large percentage changes. Large adjustments can make pricing impractical.</p>
                 ${customTotalNote}
             </div>
         </div>
@@ -750,6 +757,8 @@ async function downloadEstimatePdf(estimate) {
 
 async function downloadReport(url, name) {
     if (!url) return;
+    if (reportDownloadInProgress) return;
+    reportDownloadInProgress = true;
     uploadStatus.textContent = "Preparing download...";
     suspendCleanup = true;
 
@@ -774,9 +783,43 @@ async function downloadReport(url, name) {
     } catch (error) {
         uploadStatus.textContent = error.message || "Download failed.";
     } finally {
+        reportDownloadInProgress = false;
         setTimeout(() => {
             suspendCleanup = false;
         }, 1500);
+    }
+}
+
+async function requestEstimate(reportIdOverride) {
+    const reportIdValue = typeof reportIdOverride === "string"
+        ? reportIdOverride
+        : document.getElementById("reportId").value.trim();
+
+    const payload = {
+        reportId: reportIdValue
+    };
+
+    estimateStatus.textContent = "Generating estimate...";
+
+    try {
+        const response = await fetch("/api/estimate", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || "Unable to generate estimate.");
+        }
+
+        const estimate = await response.json();
+        renderEstimate(estimate);
+        estimateStatus.textContent = "Estimate ready.";
+    } catch (error) {
+        estimateStatus.textContent = error.message;
     }
 }
 
@@ -882,8 +925,11 @@ function handleEstimateClick(event) {
 }
 
 if (estimateResult) {
-    estimateResult.addEventListener("click", handleEstimateClick);
-    estimateResult.addEventListener("change", handleEstimateChange);
+    if (!estimateResult.dataset.bound) {
+        estimateResult.dataset.bound = "true";
+        estimateResult.addEventListener("click", handleEstimateClick);
+        estimateResult.addEventListener("change", handleEstimateChange);
+    }
 }
 
 document.querySelectorAll("[data-reveal]").forEach((element, index) => {

@@ -531,6 +531,11 @@ main {
     color: #9b3a3a;
 }
 
+.warning-text {
+    color: #b3261e;
+    font-weight: 600;
+}
+
 .output-actions {
     display: flex;
     justify-content: flex-end;
