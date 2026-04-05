@@ -11,6 +11,7 @@ const reportIdInput = document.getElementById("reportId");
 
 let currentEstimate = null;
 let isEditMode = false;
+let selectedReportFile = null;
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -156,10 +157,11 @@ async function loadReports() {
     }
 }
 
-uploadForm.addEventListener("submit", async (event) => {
+if (uploadForm) {
+    uploadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
-    const file = reportFile.files[0];
+    const file = (reportFile && reportFile.files && reportFile.files[0]) || selectedReportFile;
     if (!file) {
         uploadStatus.textContent = "Select a PDF file to upload.";
         return;
@@ -188,29 +190,56 @@ uploadForm.addEventListener("submit", async (event) => {
         updateDropzoneLabel();
         await loadReports();
     } catch (error) {
-        uploadStatus.textContent = error.message;
+        uploadStatus.textContent = error.message || "Upload failed.";
     }
-});
-
-reportFile.addEventListener("change", () => {
-    updateDropzoneLabel(reportFile.files[0]);
-});
-
-["dragenter", "dragover"].forEach((eventName) => {
-    dropzone.addEventListener(eventName, (event) => {
-        event.preventDefault();
-        dropzone.classList.add("dragover");
     });
-});
+}
 
-["dragleave", "drop"].forEach((eventName) => {
-    dropzone.addEventListener(eventName, (event) => {
-        event.preventDefault();
-        dropzone.classList.remove("dragover");
+if (reportFile) {
+    reportFile.addEventListener("change", () => {
+        selectedReportFile = reportFile.files[0] || null;
+        updateDropzoneLabel(selectedReportFile);
     });
-});
+}
 
-reportsList.addEventListener("click", (event) => {
+if (dropzone) {
+    dropzone.addEventListener("click", (event) => {
+        if (reportFile && event.target !== reportFile) {
+            reportFile.click();
+        }
+    });
+
+    ["dragenter", "dragover"].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            dropzone.classList.add("dragover");
+        });
+    });
+
+    ["dragleave", "drop"].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            dropzone.classList.remove("dragover");
+        });
+    });
+
+    dropzone.addEventListener("drop", (event) => {
+        const files = event.dataTransfer ? event.dataTransfer.files : null;
+        if (!files || !files.length) return;
+        selectedReportFile = files[0];
+
+        if (reportFile && window.DataTransfer) {
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(selectedReportFile);
+            reportFile.files = dataTransfer.files;
+        }
+
+        updateDropzoneLabel(selectedReportFile);
+    });
+}
+
+if (reportsList) {
+    reportsList.addEventListener("click", (event) => {
     const target = event.target.closest("[data-report-id]");
     if (!target) return;
 
@@ -222,9 +251,11 @@ reportsList.addEventListener("click", (event) => {
         : "Report selected.";
 
     document.getElementById("estimate").scrollIntoView({ behavior: "smooth" });
-});
+    });
+}
 
-estimateForm.addEventListener("submit", async (event) => {
+if (estimateForm) {
+    estimateForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     const payload = {
@@ -253,7 +284,8 @@ estimateForm.addEventListener("submit", async (event) => {
     } catch (error) {
         estimateStatus.textContent = error.message;
     }
-});
+    });
+}
 
 function renderEstimate(estimate) {
         const baseEstimate = {
@@ -550,8 +582,10 @@ function handleEstimateChange(event) {
     renderEstimate(currentEstimate);
 }
 
-estimateResult.addEventListener("click", handleEstimateClick);
-estimateResult.addEventListener("change", handleEstimateChange);
+if (estimateResult) {
+    estimateResult.addEventListener("click", handleEstimateClick);
+    estimateResult.addEventListener("change", handleEstimateChange);
+}
 
 document.querySelectorAll("[data-reveal]").forEach((element, index) => {
     setTimeout(() => {
