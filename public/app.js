@@ -292,6 +292,8 @@ async function loadReports() {
                             <a
                                 class="btn ghost small"
                                 href="${escapeHtml(report.downloadUrl || "")}" 
+                                target="_blank"
+                                rel="noopener"
                                 data-action="download"
                             >
                                 Download
@@ -1042,7 +1044,6 @@ function sendSessionCleanup() {
 }
 
 window.addEventListener("pagehide", sendSessionCleanup);
-window.addEventListener("beforeunload", sendSessionCleanup);
 window.addEventListener("focus", () => {
     filePickerOpen = false;
 });
