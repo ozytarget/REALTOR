@@ -20,6 +20,9 @@ const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 let uploadInProgress = false;
 let suspendCleanup = false;
 let filePickerOpen = false;
+let estimateInProgress = false;
+let downloadInProgress = false;
+let estimateRequestSeq = 0;
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -197,6 +200,17 @@ function setUploadBusy(isBusy) {
     }
 }
 
+function setEstimateBusy(isBusy) {
+    estimateInProgress = isBusy;
+    const generateButton = estimateForm
+        ? estimateForm.querySelector("button[type=\"submit\"]")
+        : null;
+    if (generateButton) {
+        generateButton.disabled = isBusy;
+        generateButton.textContent = isBusy ? "Generating..." : "Generate Estimate";
+    }
+}
+
 function clearSelectedFile() {
     selectedReportFile = null;
     if (reportFile) {
@@ -247,7 +261,10 @@ async function handleUpload(file) {
 async function loadReports() {
     try {
         const response = await fetch("/api/reports");
-        if (!response.ok) return;
+        if (!response.ok) {
+            reportsList.innerHTML = "<p class=\"muted\">Unable to load reports.</p>";
+            return;
+        }
 
         const data = await response.json();
         if (!data.reports || data.reports.length === 0) {
@@ -721,8 +738,12 @@ function renderEstimate(estimate) {
 }
 
 async function downloadEstimatePdf(estimate) {
-    if (!estimate) return;
+    if (!estimate || downloadInProgress) return;
+    downloadInProgress = true;
     const payload = normalizeEstimate(estimate);
+    if (downloadPdfButton) {
+        downloadPdfButton.disabled = true;
+    }
     estimateStatus.textContent = "Preparing PDF...";
     suspendCleanup = true;
 
@@ -753,6 +774,10 @@ async function downloadEstimatePdf(estimate) {
     } catch (error) {
         estimateStatus.textContent = error.message;
     } finally {
+        downloadInProgress = false;
+        if (downloadPdfButton) {
+            downloadPdfButton.disabled = !currentEstimate;
+        }
         setTimeout(() => {
             suspendCleanup = false;
         }, 1500);
@@ -790,6 +815,9 @@ async function deleteReport(reportId, reportName) {
 }
 
 async function requestEstimate(reportIdOverride) {
+    if (estimateInProgress) return;
+    const requestSeq = ++estimateRequestSeq;
+    setEstimateBusy(true);
     const hadEstimate = Boolean(currentEstimate);
     if (downloadPdfButton) {
         downloadPdfButton.disabled = true;
@@ -803,6 +831,12 @@ async function requestEstimate(reportIdOverride) {
     };
 
     estimateStatus.textContent = "Generating estimate...";
+    if (estimateResult) {
+        estimateResult.innerHTML = `
+            <h3>Reading report...</h3>
+            <p class="muted">Generating estimate from the selected inspection PDF.</p>
+        `;
+    }
 
     try {
         const response = await fetch("/api/estimate", {
@@ -814,17 +848,34 @@ async function requestEstimate(reportIdOverride) {
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
+            const errorData = await response.json().catch(() => ({}));
             throw new Error(errorData.error || "Unable to generate estimate.");
         }
 
         const estimate = await response.json();
+        if (requestSeq !== estimateRequestSeq) {
+            return;
+        }
         renderEstimate(estimate);
         estimateStatus.textContent = "Estimate ready.";
     } catch (error) {
+        if (requestSeq !== estimateRequestSeq) {
+            return;
+        }
+        currentEstimate = null;
+        if (estimateResult) {
+            estimateResult.innerHTML = `
+                <h3>Unable to generate estimate.</h3>
+                <p class="muted">${escapeHtml(error.message || "Please try another report.")}</p>
+            `;
+        }
         estimateStatus.textContent = error.message;
         if (downloadPdfButton) {
             downloadPdfButton.disabled = !hadEstimate;
+        }
+    } finally {
+        if (requestSeq === estimateRequestSeq) {
+            setEstimateBusy(false);
         }
     }
 }

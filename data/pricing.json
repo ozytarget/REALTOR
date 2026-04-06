@@ -85,6 +85,48 @@
             "labor": 900,
             "critical": true
         },
+        "windows_doors": {
+            "label": "Windows and Doors Repair",
+            "material": 380,
+            "labor": 520,
+            "critical": false
+        },
+        "exterior_repair": {
+            "label": "Exterior Repairs (Siding/Trim/Gutters)",
+            "material": 340,
+            "labor": 480,
+            "critical": false
+        },
+        "flooring_repair": {
+            "label": "Flooring Repair",
+            "material": 420,
+            "labor": 560,
+            "critical": false
+        },
+        "drywall_repair": {
+            "label": "Drywall and Interior Surface Repair",
+            "material": 180,
+            "labor": 320,
+            "critical": false
+        },
+        "appliance_repair": {
+            "label": "Appliance Repair/Replacement",
+            "material": 350,
+            "labor": 250,
+            "critical": false
+        },
+        "garage_repair": {
+            "label": "Garage Door Repair",
+            "material": 280,
+            "labor": 380,
+            "critical": false
+        },
+        "insulation_repair": {
+            "label": "Insulation Repair",
+            "material": 220,
+            "labor": 340,
+            "critical": false
+        },
         "general_repair": {
             "label": "General Repair Allowance",
             "material": 600,

@@ -7,9 +7,10 @@ property information, and generate structured repair estimates.
 
 1. Install dependencies:
    npm install
-2. Start the server:
+2. (Optional) Set PORT in .env (default: 3000)
+3. Start the server:
    npm start
-3. Open the app in your browser at localhost:3000
+4. Open the app in your browser at localhost:3000
 
 ## Notes
 

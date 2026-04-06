@@ -45,7 +45,12 @@ function parseCookies(header) {
         if (!key) {
             return acc;
         }
-        acc[key] = decodeURIComponent(valueParts.join("=") || "");
+        const rawValue = valueParts.join("=") || "";
+        try {
+            acc[key] = decodeURIComponent(rawValue);
+        } catch (error) {
+            acc[key] = rawValue;
+        }
         return acc;
     }, {});
 }
@@ -65,11 +70,24 @@ function ensureSession(req, res) {
     const cookies = parseCookies(req.headers.cookie || "");
     let sessionId = sanitizeSessionId(cookies.realtor_session);
 
-    if (!sessionId) {
+    if (!sessionId || sessionId.length < 20) {
         sessionId = createSessionId();
+
+        const cookieParts = [
+            `realtor_session=${encodeURIComponent(sessionId)}`,
+            "Path=/",
+            "HttpOnly",
+            "SameSite=Lax",
+            "Max-Age=86400"
+        ];
+
+        if (process.env.NODE_ENV === "production") {
+            cookieParts.push("Secure");
+        }
+
         res.setHeader(
             "Set-Cookie",
-            `realtor_session=${sessionId}; Path=/; SameSite=Lax; Max-Age=86400`
+            cookieParts.join("; ")
         );
     }
 
@@ -126,6 +144,23 @@ app.use(express.static(path.join(__dirname, "public")));
 app.post("/api/upload", upload.single("report"), (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: "No file uploaded." });
+    }
+
+    try {
+        const uploadedPath = req.file.path;
+        const fd = fs.openSync(uploadedPath, "r");
+        const headerBuffer = Buffer.alloc(5);
+        fs.readSync(fd, headerBuffer, 0, 5, 0);
+        fs.closeSync(fd);
+        if (headerBuffer.toString("utf8") !== "%PDF-") {
+            fs.unlinkSync(uploadedPath);
+            return res.status(400).json({ error: "Uploaded file is not a valid PDF." });
+        }
+    } catch (error) {
+        if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+        }
+        return res.status(400).json({ error: "Unable to validate uploaded PDF." });
     }
 
     const reportEntry = storeReportIndexEntry(req.sessionDir, req.file);
@@ -230,10 +265,18 @@ app.post("/api/session/cleanup", (req, res) => {
         return res.status(500).json({ error: "Unable to clear session data." });
     }
 
-    res.setHeader(
-        "Set-Cookie",
-        "realtor_session=; Path=/; Max-Age=0; SameSite=Lax"
-    );
+    const clearCookieParts = [
+        "realtor_session=",
+        "Path=/",
+        "Max-Age=0",
+        "HttpOnly",
+        "SameSite=Lax"
+    ];
+    if (process.env.NODE_ENV === "production") {
+        clearCookieParts.push("Secure");
+    }
+
+    res.setHeader("Set-Cookie", clearCookieParts.join("; "));
     return res.json({ ok: true });
 });
 
@@ -250,11 +293,30 @@ app.post("/api/estimate", async (req, res) => {
 app.post("/api/estimate/pdf", (req, res) => {
     try {
         const estimate = req.body;
-        if (!estimate || !estimate.estimateId) {
+        if (!estimate || !estimate.estimateId || !Array.isArray(estimate.lineItems)) {
             return res.status(400).json({ error: "Estimate payload is required." });
         }
 
-        return generateEstimatePdf(estimate, res);
+        const subtotal = estimate.lineItems.reduce((sum, item) => {
+            const value = Number(item && item.total);
+            return sum + (Number.isFinite(value) ? value : 0);
+        }, 0);
+        const taxRate = Number(estimate.taxRate || TAX_RATE);
+        const roundedSubtotal = Math.round(subtotal * 100) / 100;
+        const tax = Math.round(roundedSubtotal * taxRate * 100) / 100;
+        const total = Math.round((roundedSubtotal + tax) * 100) / 100;
+
+        const safeEstimate = {
+            ...estimate,
+            taxRate,
+            totals: {
+                subtotal: roundedSubtotal,
+                tax,
+                total
+            }
+        };
+
+        return generateEstimatePdf(safeEstimate, res);
     } catch (error) {
         return res.status(500).json({ error: "Unable to generate PDF." });
     }
@@ -358,9 +420,16 @@ async function buildEstimate(payload, sessionDir) {
     const location = mergeLocations(baseLocation, analysis.location);
     const regionProfile = getRegionProfile(location.state);
 
-    const lineItems = analysis.repairs.length > 0
-        ? buildLineItemsFromRepairs(analysis.repairs, regionProfile)
-        : buildLineItemsFromAreas(resolveAreas(payload), regionProfile);
+    let lineItems;
+    if (analysis.repairs.length > 0) {
+        lineItems = buildLineItemsFromRepairs(analysis.repairs, regionProfile);
+        console.log(`[ESTIMATE] Using ${lineItems.length} repair-based line items`);
+    } else {
+        const fallbackSummary = payload.summary || analysis._pdfText || analysis.summary || "";
+        const areas = resolveAreas({ ...payload, summary: fallbackSummary });
+        lineItems = buildLineItemsFromAreas(areas, regionProfile);
+        console.log(`[ESTIMATE] Fallback to area-based: [${areas.join(", ")}]`);
+    }
 
     const criticalItems = lineItems.filter((item) => item.critical);
     const additionalItems = lineItems.filter((item) => !item.critical);
@@ -488,33 +557,67 @@ function buildLineItemsFromRepairs(repairs, regionProfile) {
     const materialMultiplier = regionProfile.materialMultiplier || 1;
     const laborMultiplier = regionProfile.laborMultiplier || 1;
     const itemsCatalog = PRICING.items || DEFAULT_PRICING.items;
-    const unique = new Map();
+    const areaMapByItemKey = {
+        water_heater_replace: "plumbing",
+        water_heater_repair: "plumbing",
+        roof_leak: "roof",
+        plumbing_leak: "plumbing",
+        electrical_hazard: "electrical",
+        hvac_service: "hvac",
+        foundation_crack: "foundation",
+        windows_doors: "windows",
+        exterior_repair: "exterior",
+        flooring_repair: "flooring",
+        drywall_repair: "drywall",
+        appliance_repair: "general",
+        garage_repair: "exterior",
+        insulation_repair: "exterior"
+    };
+    const grouped = new Map();
 
     repairs.forEach((repair) => {
         const itemKey = normalizeRepairKey(repair);
-        if (!unique.has(itemKey)) {
-            unique.set(itemKey, { ...repair, itemKey });
+        const current = grouped.get(itemKey) || { ...repair, itemKey, quantity: 0 };
+        current.quantity += 1;
+        if (!current.notes && repair.notes) {
+            current.notes = repair.notes;
         }
+        if (!current.parts && Array.isArray(repair.parts)) {
+            current.parts = repair.parts;
+        }
+        current.critical = Boolean(current.critical || repair.critical);
+        grouped.set(itemKey, current);
     });
 
-    return Array.from(unique.values()).map((repair) => {
-        const pricingItem = itemsCatalog[repair.itemKey] || itemsCatalog.general_repair;
-        const material = Math.round(pricingItem.material * materialMultiplier);
-        const labor = Math.round(pricingItem.labor * laborMultiplier);
-        const notes = repair.notes || pricingItem.notes || "";
+    return Array.from(grouped.values()).map((repair) => {
+        const pricingItem = itemsCatalog[repair.itemKey];
+        const fallbackArea = areaMapByItemKey[repair.itemKey] || "general";
+        const catalogFallback = REPAIR_CATALOG[fallbackArea] || REPAIR_CATALOG.general;
+        const materialBase = pricingItem
+            ? Number(pricingItem.material || 0)
+            : Number(catalogFallback.material || DEFAULT_PRICING.items.general_repair.material);
+        const laborBase = pricingItem
+            ? Number(pricingItem.labor || 0)
+            : Number(catalogFallback.labor || DEFAULT_PRICING.items.general_repair.labor);
+        const notes = repair.notes || (pricingItem && pricingItem.notes) || "";
         const parts = Array.isArray(repair.parts)
             ? repair.parts
-            : Array.isArray(pricingItem.parts)
+            : Array.isArray(pricingItem && pricingItem.parts)
                 ? pricingItem.parts
                 : [];
 
+        const quantity = Math.max(1, Number(repair.quantity || 1));
+        const material = Math.round(materialBase * materialMultiplier * quantity);
+        const labor = Math.round(laborBase * laborMultiplier * quantity);
+
         return {
             area: repair.itemKey,
-            description: pricingItem.label,
+            description: pricingItem && pricingItem.label ? pricingItem.label : (catalogFallback.label || "General Repairs"),
+            quantity,
             material,
             labor,
             total: material + labor,
-            critical: Boolean(repair.critical || pricingItem.critical),
+            critical: Boolean(repair.critical || (pricingItem && pricingItem.critical)),
             notes,
             parts
         };
@@ -553,7 +656,12 @@ async function analyzeInspection({ reportEntry, summary, location, sessionDir })
         const filePath = path.join(activeDir, reportEntry.storedName);
         if (fs.existsSync(filePath)) {
             pdfBuffer = fs.readFileSync(filePath);
-            pdfText = await extractPdfText(pdfBuffer);
+            const extraction = await extractPdfText(pdfBuffer);
+            pdfText = extraction.text;
+            if (extraction.error) {
+                warnings.push(extraction.error);
+            }
+            console.log(`[PDF] Extracted ${pdfText.length} chars from ${reportEntry.originalName}`);
         }
     }
 
@@ -576,16 +684,23 @@ async function analyzeInspection({ reportEntry, summary, location, sessionDir })
             summary,
             location
         });
-        if (aiResult && aiResult.repairs.length > 0) {
-            if (!aiResult.location && result.location) {
-                aiResult.location = result.location;
+        if (aiResult.warning) {
+            warnings.push(aiResult.warning);
+        }
+        if (aiResult.data && aiResult.data.repairs.length > 0) {
+            const extracted = aiResult.data;
+            if (!extracted.location && result.location) {
+                extracted.location = result.location;
             }
-            result = aiResult;
+            result = extracted;
             source = "gemini";
+            console.log(`[GEMINI] Found ${result.repairs.length} repairs`);
         }
     } else if (pdfBuffer && pdfText.trim().length < 40) {
         warnings.push("PDF appears scanned. Configure GEMINI_API_KEY to enable OCR.");
     }
+
+    console.log(`[ANALYSIS] source=${source}, repairs=${result.repairs.length}, text=${pdfText.length} chars`);
 
     return {
         ...analysis,
@@ -593,16 +708,23 @@ async function analyzeInspection({ reportEntry, summary, location, sessionDir })
         source,
         warnings,
         reportId: reportEntry ? reportEntry.id : "",
-        reportName: reportEntry ? reportEntry.originalName : ""
+        reportName: reportEntry ? reportEntry.originalName : "",
+        _pdfText: combinedText
     };
 }
 
 async function extractPdfText(buffer) {
     try {
         const data = await pdfParse(buffer);
-        return String(data.text || "").trim();
+        return {
+            text: String(data.text || "").trim(),
+            error: ""
+        };
     } catch (error) {
-        return "";
+        return {
+            text: "",
+            error: "PDF text extraction failed."
+        };
     }
 }
 
@@ -725,31 +847,52 @@ function extractFindingsFromText(text) {
         .map((line) => line.trim())
         .filter(Boolean);
 
+    const positiveLineRegex = /(satisfactory|serviceable|ok|acceptable|monitor|maintain|good condition|no defects|no issues|no problems|no repairs?|no action|none observed)/i;
+    const negatedIssueRegex = /(no|none|without)\s+(leak|leaks|damage|damaged|defect|defects|problem|problems|issue|issues|hazard|hazards|unsafe|crack|cracks|corrosion|rust|burst|failure|repair|replace)/i;
+    const excludedLineRegex = /(inspected|recommended maintenance|typical life|service life|information only|for your information|appears serviceable|working as intended|maintenance item)/i;
+    const issueOnlyRegex = /(leak|leaking|damage|damaged|defect|defective|unsafe|hazard|crack|corrosion|rust|failure|not working|not cooling|not heating|active seepage|missing|exposed|overheat|burst|improper)/i;
+    const candidateWindows = lines
+        .map((line, index) => {
+            const nextLine = lines[index + 1] || "";
+            return [line, nextLine].filter(Boolean).join(" ");
+        })
+        .filter((windowText) => {
+            return !positiveLineRegex.test(windowText)
+                && !negatedIssueRegex.test(windowText)
+                && !excludedLineRegex.test(windowText)
+                && issueOnlyRegex.test(windowText);
+        });
+
+    const lineHasIssue = (line, systemRegex, issueRegex) => {
+        if (!systemRegex.test(line) || !issueRegex.test(line)) {
+            return false;
+        }
+
+        if (positiveLineRegex.test(line) || negatedIssueRegex.test(line) || excludedLineRegex.test(line)) {
+            return false;
+        }
+
+        return true;
+    };
+
     const hasIssueForSystem = (systemRegex, issueRegex) => {
         if (!systemRegex || !issueRegex) {
             return false;
         }
 
-        const matchLine = lines.some((line) => systemRegex.test(line) && issueRegex.test(line));
+        const matchLine = candidateWindows.some((windowText) => lineHasIssue(windowText, systemRegex, issueRegex));
         if (matchLine) {
             return true;
         }
-
-        const systemSource = systemRegex.source;
-        const issueSource = issueRegex.source;
-        const nearForward = new RegExp(`(?:${systemSource})[\s\S]{0,80}(?:${issueSource})`, "i");
-        const nearBackward = new RegExp(`(?:${issueSource})[\s\S]{0,80}(?:${systemSource})`, "i");
-
-        return nearForward.test(lower) || nearBackward.test(lower);
+        return false;
     };
 
     const waterHeaterRegex = /water\s*heater|waterheater/i;
-    const waterHeaterIssueRegex = /(replace|replacement|leak|corrosion|rust|failed|not working|valve|thermostat|pressure relief|pilot|element)/i;
+    const waterHeaterIssueRegex = /(leak|leaking|corrosion|rust|failed|not working|defect|damage|improper|missing pan|exposed)/i;
     if (hasIssueForSystem(waterHeaterRegex, waterHeaterIssueRegex)) {
-        const replaceRegex = /(water\s*heater|waterheater)[\s\S]{0,80}(replace|replacement|leak|corrosion|rust|failed|not working)/i;
-        const repairRegex = /(water\s*heater|waterheater)[\s\S]{0,80}(valve|thermostat|pressure relief|pilot|element)/i;
-        const shouldReplace = replaceRegex.test(lower);
-        const canRepair = repairRegex.test(lower);
+        const waterHeaterContext = candidateWindows.filter((line) => waterHeaterRegex.test(line)).join(" ").toLowerCase();
+        const shouldReplace = /(replace|replacement|leak|corrosion|rust|failed|not working)/i.test(waterHeaterContext);
+        const canRepair = /(service needed|improper|defect|damage)/i.test(waterHeaterContext);
         const action = shouldReplace || !canRepair ? "replace" : "repair";
 
         repairs.push({
@@ -757,7 +900,7 @@ function extractFindingsFromText(text) {
             system: "water heater",
             action,
             issue: "Water heater requires attention.",
-            critical: action === "replace" || /leak|leaking/.test(lower)
+            critical: action === "replace" || /leak|leaking/.test(waterHeaterContext)
         });
 
         summaryParts.push("Water heater issue detected.");
@@ -767,7 +910,7 @@ function extractFindingsFromText(text) {
     }
 
     const roofRegex = /roof/i;
-    const roofIssueRegex = /(leak|damage|damaged|missing|defect|deterior|problem|repair|replace)/i;
+    const roofIssueRegex = /(leak|leaking|damage|damaged|missing|defect|deterior|active seepage|exposed)/i;
     if (hasIssueForSystem(roofRegex, roofIssueRegex)) {
         repairs.push({
             itemKey: "roof_leak",
@@ -781,20 +924,21 @@ function extractFindingsFromText(text) {
     }
 
     const plumbingRegex = /plumb|pipe|water line|supply line|drain/i;
-    const plumbingIssueRegex = /(leak|burst|corrosion|rust|damage|damaged|defect|problem|repair|replace|clog|backup)/i;
+    const plumbingIssueRegex = /(leak|leaking|burst|corrosion|rust|damage|damaged|defect|clog|backup|active seepage|improper)/i;
     if (hasIssueForSystem(plumbingRegex, plumbingIssueRegex)) {
+        const plumbingContext = candidateWindows.filter((line) => plumbingRegex.test(line)).join(" ").toLowerCase();
         repairs.push({
             itemKey: "plumbing_leak",
             system: "plumbing",
             action: "repair",
             issue: "Plumbing leak reported.",
-            critical: /leak|burst/.test(lower)
+            critical: /leak|burst|active seepage/.test(plumbingContext)
         });
         summaryParts.push("Plumbing issue detected.");
     }
 
     const electricalRegex = /electrical|panel|wiring|outlet|breaker/i;
-    const electricalIssueRegex = /(hazard|unsafe|overheat|exposed|defect|problem|repair|replace|arc|burn)/i;
+    const electricalIssueRegex = /(hazard|unsafe|overheat|exposed|defect|arc|burn|shock|improper)/i;
     if (hasIssueForSystem(electricalRegex, electricalIssueRegex)) {
         repairs.push({
             itemKey: "electrical_hazard",
@@ -808,7 +952,7 @@ function extractFindingsFromText(text) {
     }
 
     const hvacRegex = /hvac|air condition|ac unit|furnace|heat pump/i;
-    const hvacIssueRegex = /(repair|replace|not working|not cooling|not heating|problem|defect|leak|failure|service needed|recommend)/i;
+    const hvacIssueRegex = /(not working|not cooling|not heating|failure|leak|defect|improper|damaged)/i;
     if (hasIssueForSystem(hvacRegex, hvacIssueRegex)) {
         repairs.push({
             itemKey: "hvac_service",
@@ -821,7 +965,7 @@ function extractFindingsFromText(text) {
     }
 
     const foundationRegex = /foundation|settlement|crack/i;
-    const foundationIssueRegex = /(crack|settlement|movement|defect|problem|repair|damage|damaged)/i;
+    const foundationIssueRegex = /(crack|settlement|movement|defect|damage|damaged|active seepage|unsafe)/i;
     if (hasIssueForSystem(foundationRegex, foundationIssueRegex)) {
         repairs.push({
             itemKey: "foundation_crack",
@@ -832,6 +976,97 @@ function extractFindingsFromText(text) {
         });
         summaryParts.push("Foundation issue detected.");
         criticalParts.push("Foundation repair recommended.");
+    }
+
+    const windowsRegex = /window|door|sliding|patio door|storm door/i;
+    const windowsIssueRegex = /(broken|crack|seal|fog|damage|damaged|rot|replace|repair|recommend|draft|leak|deteriorat)/i;
+    if (hasIssueForSystem(windowsRegex, windowsIssueRegex)) {
+        repairs.push({
+            itemKey: "windows_doors",
+            system: "windows/doors",
+            action: "repair",
+            issue: "Window or door issue detected.",
+            critical: false
+        });
+        summaryParts.push("Window/door issue detected.");
+    }
+
+    const exteriorRegex = /exterior|siding|fascia|soffit|gutter|downspout|trim|stucco|brick/i;
+    const exteriorIssueRegex = /(damage|damaged|rot|deteriorat|missing|loose|crack|repair|replace|recommend|leak|peel)/i;
+    if (hasIssueForSystem(exteriorRegex, exteriorIssueRegex)) {
+        repairs.push({
+            itemKey: "exterior_repair",
+            system: "exterior",
+            action: "repair",
+            issue: "Exterior damage reported.",
+            critical: false
+        });
+        summaryParts.push("Exterior issue detected.");
+    }
+
+    const flooringRegex = /floor|carpet|tile|vinyl|laminate|hardwood/i;
+    const flooringIssueRegex = /(damage|damaged|crack|loose|buckl|stain|worn|repair|replace|recommend|water|warp)/i;
+    if (hasIssueForSystem(flooringRegex, flooringIssueRegex)) {
+        repairs.push({
+            itemKey: "flooring_repair",
+            system: "flooring",
+            action: "repair",
+            issue: "Flooring issue detected.",
+            critical: false
+        });
+        summaryParts.push("Flooring issue detected.");
+    }
+
+    const drywallRegex = /drywall|sheetrock|wall|ceiling|interior wall|interior surface/i;
+    const drywallIssueRegex = /(crack|hole|damage|damaged|water stain|stain|patch|repair|replace|recommend|peel|bubble|nail pop)/i;
+    if (hasIssueForSystem(drywallRegex, drywallIssueRegex)) {
+        repairs.push({
+            itemKey: "drywall_repair",
+            system: "drywall",
+            action: "repair",
+            issue: "Drywall or interior surface damage.",
+            critical: false
+        });
+        summaryParts.push("Drywall issue detected.");
+    }
+
+    const applianceRegex = /appliance|dishwasher|oven|range|stove|microwave|disposal|garbage disposal|refrigerator/i;
+    const applianceIssueRegex = /(not working|broken|leak|damage|damaged|defect|repair|replace|recommend|malfunction|inoperable)/i;
+    if (hasIssueForSystem(applianceRegex, applianceIssueRegex)) {
+        repairs.push({
+            itemKey: "appliance_repair",
+            system: "appliances",
+            action: "repair",
+            issue: "Appliance issue detected.",
+            critical: false
+        });
+        summaryParts.push("Appliance issue detected.");
+    }
+
+    const garageRegex = /garage|garage door|opener/i;
+    const garageIssueRegex = /(not working|broken|damage|damaged|defect|repair|replace|recommend|malfunction|inoperable|safety|reverse)/i;
+    if (hasIssueForSystem(garageRegex, garageIssueRegex)) {
+        repairs.push({
+            itemKey: "garage_repair",
+            system: "garage",
+            action: "repair",
+            issue: "Garage door issue detected.",
+            critical: false
+        });
+        summaryParts.push("Garage door issue detected.");
+    }
+
+    const insulationRegex = /insulation|attic|crawl\s*space|vapor barrier/i;
+    const insulationIssueRegex = /(missing|insufficient|damage|damaged|wet|mold|moisture|repair|replace|recommend|inadequate)/i;
+    if (hasIssueForSystem(insulationRegex, insulationIssueRegex)) {
+        repairs.push({
+            itemKey: "insulation_repair",
+            system: "insulation",
+            action: "repair",
+            issue: "Insulation issue detected.",
+            critical: false
+        });
+        summaryParts.push("Insulation issue detected.");
     }
 
     const deduped = dedupeRepairs(repairs);
@@ -856,7 +1091,7 @@ function dedupeRepairs(repairs) {
 
 async function analyzeWithGemini({ buffer, summary, location }) {
     if (!geminiClient || !buffer) {
-        return null;
+        return { data: null, warning: "" };
     }
 
     try {
@@ -866,7 +1101,7 @@ async function analyzeWithGemini({ buffer, summary, location }) {
             "Read the inspector report and return ONLY JSON.",
             "Schema: { summary: string, criticalSummary: string, location: { addressLine, city, state, zip }, repairs: [{ itemKey, issue, action, critical, parts }] }",
             "If the property address is present, fill location fields. Otherwise use empty strings.",
-            "Allowed itemKey values: water_heater_replace, water_heater_repair, roof_leak, plumbing_leak, electrical_hazard, hvac_service, foundation_crack, general_repair.",
+            "Allowed itemKey values: water_heater_replace, water_heater_repair, roof_leak, plumbing_leak, electrical_hazard, hvac_service, foundation_crack, windows_doors, exterior_repair, flooring_repair, drywall_repair, appliance_repair, garage_repair, insulation_repair, general_repair.",
             "If the water heater is leaking, corroded, failed, or not working, use water_heater_replace.",
             "If the water heater needs a valve, thermostat, or relief part, use water_heater_repair.",
             "Mark critical true for safety hazards or active water intrusion.",
@@ -893,9 +1128,15 @@ async function analyzeWithGemini({ buffer, summary, location }) {
         const result = await model.generateContent(parts);
         const text = result.response.text();
         const parsed = parseGeminiJson(text);
-        return normalizeGeminiResult(parsed);
+        return {
+            data: normalizeGeminiResult(parsed),
+            warning: ""
+        };
     } catch (error) {
-        return null;
+        return {
+            data: null,
+            warning: "Gemini analysis failed; using heuristic parser."
+        };
     }
 }
 
@@ -1009,9 +1250,17 @@ function findReportEntry(sessionDir, reportId) {
     return (
         index.find((entry) => entry.id.toLowerCase() === normalized) ||
         index.find((entry) => entry.storedName.toLowerCase() === normalized) ||
-        index.find((entry) => entry.originalName.toLowerCase().includes(normalized)) ||
+        index.find((entry) => entry.originalName.toLowerCase() === normalized) ||
         null
     );
+}
+
+function ensurePdfSpace(doc, neededHeight) {
+    const spaceNeeded = Number(neededHeight || 60);
+    const bottomLimit = doc.page.height - doc.page.margins.bottom;
+    if (doc.y + spaceNeeded > bottomLimit) {
+        doc.addPage();
+    }
 }
 
 function generateEstimatePdf(estimate, res) {
@@ -1163,15 +1412,18 @@ function renderPdfSection(doc, title, items, layout) {
     const amountWidth = 90;
     const descriptionWidth = Math.max(120, contentWidth - amountWidth - 10);
 
+    ensurePdfSpace(doc, 40);
     doc.fontSize(12).text(title, contentX, doc.y, { underline: true, width: contentWidth });
 
     if (!items.length) {
+        ensurePdfSpace(doc, 24);
         doc.fontSize(9).text("None listed.", contentX, doc.y, { width: contentWidth });
         doc.moveDown(0.5);
         return;
     }
 
     items.forEach((item) => {
+        ensurePdfSpace(doc, 56);
         const startY = doc.y;
         const description = String(item.description || "");
         const descriptionHeight = doc.heightOfString(description, {
@@ -1292,21 +1544,25 @@ function resolveAreas(payload) {
     const matched = [];
 
     if (summary.includes("roof")) matched.push("roof");
-    if (summary.includes("plumb")) matched.push("plumbing");
-    if (summary.includes("elect")) matched.push("electrical");
-    if (summary.includes("drywall") || summary.includes("sheetrock")) matched.push("drywall");
-    if (summary.includes("paint")) matched.push("paint");
-    if (summary.includes("floor")) matched.push("flooring");
-    if (summary.includes("hvac") || summary.includes("ac")) matched.push("hvac");
+    if (summary.includes("plumb") || summary.includes("pipe") || summary.includes("drain")) matched.push("plumbing");
+    if (summary.includes("elect") || summary.includes("wiring") || summary.includes("panel") || summary.includes("outlet")) matched.push("electrical");
+    if (summary.includes("drywall") || summary.includes("sheetrock") || summary.includes("nail pop") || summary.includes("wall crack")) matched.push("drywall");
+    if (summary.includes("paint") || summary.includes("peel")) matched.push("paint");
+    if (summary.includes("floor") || summary.includes("carpet") || summary.includes("tile") || summary.includes("vinyl")) matched.push("flooring");
+    if (summary.includes("hvac") || summary.includes("ac ") || summary.includes("air condition") || summary.includes("furnace") || summary.includes("heat pump")) matched.push("hvac");
     if (summary.includes("window") || summary.includes("door")) matched.push("windows");
     if (summary.includes("foundation") || summary.includes("settlement")) matched.push("foundation");
-    if (summary.includes("siding") || summary.includes("exterior")) matched.push("exterior");
+    if (summary.includes("siding") || summary.includes("exterior") || summary.includes("gutter") || summary.includes("fascia") || summary.includes("soffit")) matched.push("exterior");
+    if (summary.includes("water heater") || summary.includes("waterheater")) matched.push("plumbing");
+    if (summary.includes("garage") || summary.includes("opener")) matched.push("exterior");
+    if (summary.includes("insulation") || summary.includes("attic") || summary.includes("crawl")) matched.push("exterior");
+    if (summary.includes("appliance") || summary.includes("dishwasher") || summary.includes("disposal") || summary.includes("oven") || summary.includes("range")) matched.push("general");
 
     if (matched.length === 0) {
         matched.push("general");
     }
 
-    return matched;
+    return [...new Set(matched)];
 }
 
 function parseStateFromAddress(addressLine) {
