@@ -17,7 +17,10 @@ const PRICING_PATH = path.join(__dirname, "data", "pricing.json");
 const LOGO_PATH = path.join(__dirname, "public", "assets", "logo.png");
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
-const SESSION_SECRET = process.env.SESSION_SECRET || "dev-insecure-secret-change";
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+if (!process.env.SESSION_SECRET) {
+    console.warn("SESSION_SECRET is not set. Using an ephemeral secret for this process.");
+}
 const geminiClient = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
 if (!fs.existsSync(uploadsBaseDir)) {
     fs.mkdirSync(uploadsBaseDir, { recursive: true });
@@ -602,8 +605,8 @@ function buildLineItemsFromAreas(areas, regionProfile) {
 
     return areas.map((area) => {
         const catalogEntry = REPAIR_CATALOG[area] || REPAIR_CATALOG.general;
-        const mappedItemKey = areaToItemKey[area] || "general_repair";
-        const pricingEntry = itemsCatalog[mappedItemKey];
+        const mappedItemKey = areaToItemKey[area] || "";
+        const pricingEntry = mappedItemKey ? itemsCatalog[mappedItemKey] : null;
         const materialBase = pricingEntry
             ? Number(pricingEntry.material || 0)
             : Number(catalogEntry.material || DEFAULT_PRICING.items.general_repair.material);

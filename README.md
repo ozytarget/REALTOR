@@ -21,8 +21,9 @@ property information, and generate structured repair estimates.
 ## Report analysis (optional)
 
 1. Copy .env.example to .env
-2. Set GEMINI_API_KEY
-3. (Optional) Set GEMINI_MODEL
+2. Set SESSION_SECRET
+3. Set GEMINI_API_KEY
+4. (Optional) Set GEMINI_MODEL
 
 When configured, the server will use the extraction service to read PDFs
 (including scanned documents) and separate critical repairs from additional
