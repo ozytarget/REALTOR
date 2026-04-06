@@ -242,7 +242,7 @@ async function handleUpload(file) {
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
+            const errorData = await response.json().catch(() => ({}));
             throw new Error(errorData.error || "Upload failed.");
         }
 
@@ -289,6 +289,22 @@ async function loadReports() {
               <div class="muted">${uploaded} · ${size}</div>
             </div>
             <div class="report-actions">
+                            <a
+                                class="btn ghost small"
+                                href="${escapeHtml(report.downloadUrl || "")}" 
+                                data-action="download"
+                            >
+                                Download
+                            </a>
+                            <a
+                                class="btn ghost small"
+                                href="${escapeHtml(report.url || "")}" 
+                                target="_blank"
+                                rel="noopener"
+                                data-action="open"
+                            >
+                                Open
+                            </a>
                             <button
                 type="button"
                 class="btn success large"
@@ -415,6 +431,16 @@ if (reportsList) {
                 const reportId = deleteButton.getAttribute("data-report-id") || "";
                 const reportName = deleteButton.getAttribute("data-report-name") || "";
                 deleteReport(reportId, reportName);
+                return;
+            }
+
+            const downloadLink = event.target.closest("[data-action=\"download\"]");
+            if (downloadLink) {
+                return;
+            }
+
+            const openLink = event.target.closest("[data-action=\"open\"]");
+            if (openLink) {
                 return;
             }
 
@@ -757,7 +783,7 @@ async function downloadEstimatePdf(estimate) {
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
+            const errorData = await response.json().catch(() => ({}));
             throw new Error(errorData.error || "Unable to generate PDF.");
         }
 

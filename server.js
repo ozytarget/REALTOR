@@ -17,6 +17,7 @@ const PRICING_PATH = path.join(__dirname, "data", "pricing.json");
 const LOGO_PATH = path.join(__dirname, "public", "assets", "logo.png");
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+const SESSION_SECRET = process.env.SESSION_SECRET || "dev-insecure-secret-change";
 const geminiClient = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
 if (!fs.existsSync(uploadsBaseDir)) {
     fs.mkdirSync(uploadsBaseDir, { recursive: true });
@@ -66,15 +67,52 @@ function createSessionId() {
     return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function signSessionId(sessionId) {
+    return crypto
+        .createHmac("sha256", SESSION_SECRET)
+        .update(String(sessionId || ""))
+        .digest("hex")
+        .slice(0, 24);
+}
+
+function parseSignedSession(value) {
+    const raw = String(value || "");
+    const dotIndex = raw.lastIndexOf(".");
+    if (dotIndex <= 0) {
+        return "";
+    }
+
+    const rawId = raw.slice(0, dotIndex);
+    const signature = raw.slice(dotIndex + 1);
+    const sessionId = sanitizeSessionId(rawId);
+    if (!sessionId || !signature) {
+        return "";
+    }
+
+    const expected = signSessionId(sessionId);
+    const actualBuffer = Buffer.from(signature, "utf8");
+    const expectedBuffer = Buffer.from(expected, "utf8");
+    if (actualBuffer.length !== expectedBuffer.length) {
+        return "";
+    }
+
+    if (!crypto.timingSafeEqual(actualBuffer, expectedBuffer)) {
+        return "";
+    }
+
+    return sessionId;
+}
+
 function ensureSession(req, res) {
     const cookies = parseCookies(req.headers.cookie || "");
-    let sessionId = sanitizeSessionId(cookies.realtor_session);
+    let sessionId = parseSignedSession(cookies.realtor_session);
 
     if (!sessionId || sessionId.length < 20) {
         sessionId = createSessionId();
+        const signedSession = `${sessionId}.${signSessionId(sessionId)}`;
 
         const cookieParts = [
-            `realtor_session=${encodeURIComponent(sessionId)}`,
+            `realtor_session=${encodeURIComponent(signedSession)}`,
             "Path=/",
             "HttpOnly",
             "SameSite=Lax",
@@ -146,12 +184,12 @@ app.post("/api/upload", upload.single("report"), (req, res) => {
         return res.status(400).json({ error: "No file uploaded." });
     }
 
+    let fd = null;
     try {
         const uploadedPath = req.file.path;
-        const fd = fs.openSync(uploadedPath, "r");
+        fd = fs.openSync(uploadedPath, "r");
         const headerBuffer = Buffer.alloc(5);
         fs.readSync(fd, headerBuffer, 0, 5, 0);
-        fs.closeSync(fd);
         if (headerBuffer.toString("utf8") !== "%PDF-") {
             fs.unlinkSync(uploadedPath);
             return res.status(400).json({ error: "Uploaded file is not a valid PDF." });
@@ -161,6 +199,14 @@ app.post("/api/upload", upload.single("report"), (req, res) => {
             fs.unlinkSync(req.file.path);
         }
         return res.status(400).json({ error: "Unable to validate uploaded PDF." });
+    } finally {
+        if (fd !== null) {
+            try {
+                fs.closeSync(fd);
+            } catch (error) {
+                // No-op: validation already completed or file descriptor is closed.
+            }
+        }
     }
 
     const reportEntry = storeReportIndexEntry(req.sessionDir, req.file);
@@ -286,7 +332,11 @@ app.post("/api/estimate", async (req, res) => {
         const estimate = await buildEstimate(payload, req.sessionDir);
         res.json(estimate);
     } catch (error) {
-        res.status(500).json({ error: error.message || "Unable to generate estimate." });
+        const message = error.message || "Unable to generate estimate.";
+        if (message === "Report ID not found.") {
+            return res.status(404).json({ error: message });
+        }
+        res.status(500).json({ error: message });
     }
 });
 
@@ -433,9 +483,9 @@ async function buildEstimate(payload, sessionDir) {
 
     const criticalItems = lineItems.filter((item) => item.critical);
     const additionalItems = lineItems.filter((item) => !item.critical);
-    const subtotal = lineItems.reduce((sum, item) => sum + item.total, 0);
-    const tax = Math.round(subtotal * TAX_RATE);
-    const total = subtotal + tax;
+    const subtotal = Math.round(lineItems.reduce((sum, item) => sum + item.total, 0) * 100) / 100;
+    const tax = Math.round(subtotal * TAX_RATE * 100) / 100;
+    const total = Math.round((subtotal + tax) * 100) / 100;
 
     const assumptions = [
         "Pricing is based on project scope, labor, and contractor costs.",
@@ -536,19 +586,40 @@ function getRegionProfile(state) {
 function buildLineItemsFromAreas(areas, regionProfile) {
     const materialMultiplier = regionProfile.materialMultiplier || 1;
     const laborMultiplier = regionProfile.laborMultiplier || 1;
+    const itemsCatalog = PRICING.items || DEFAULT_PRICING.items;
+    const areaToItemKey = {
+        roof: "roof_leak",
+        plumbing: "plumbing_leak",
+        electrical: "electrical_hazard",
+        hvac: "hvac_service",
+        foundation: "foundation_crack",
+        windows: "windows_doors",
+        exterior: "exterior_repair",
+        flooring: "flooring_repair",
+        drywall: "drywall_repair",
+        general: "general_repair"
+    };
 
     return areas.map((area) => {
         const catalogEntry = REPAIR_CATALOG[area] || REPAIR_CATALOG.general;
-        const material = Math.round(catalogEntry.material * materialMultiplier);
-        const labor = Math.round(catalogEntry.labor * laborMultiplier);
+        const mappedItemKey = areaToItemKey[area] || "general_repair";
+        const pricingEntry = itemsCatalog[mappedItemKey];
+        const materialBase = pricingEntry
+            ? Number(pricingEntry.material || 0)
+            : Number(catalogEntry.material || DEFAULT_PRICING.items.general_repair.material);
+        const laborBase = pricingEntry
+            ? Number(pricingEntry.labor || 0)
+            : Number(catalogEntry.labor || DEFAULT_PRICING.items.general_repair.labor);
+        const material = Math.round(materialBase * materialMultiplier);
+        const labor = Math.round(laborBase * laborMultiplier);
 
         return {
             area,
-            description: catalogEntry.label,
+            description: pricingEntry && pricingEntry.label ? pricingEntry.label : catalogEntry.label,
             material,
             labor,
             total: material + labor,
-            critical: false
+            critical: Boolean(pricingEntry && pricingEntry.critical)
         };
     });
 }
@@ -641,6 +712,13 @@ function normalizeRepairKey(repair) {
     if (system.includes("elect")) return "electrical_hazard";
     if (system.includes("hvac") || system.includes("air")) return "hvac_service";
     if (system.includes("foundation")) return "foundation_crack";
+    if (system.includes("window") || system.includes("door")) return "windows_doors";
+    if (system.includes("exterior") || system.includes("siding") || system.includes("gutter")) return "exterior_repair";
+    if (system.includes("floor")) return "flooring_repair";
+    if (system.includes("drywall") || system.includes("sheetrock") || system.includes("wall")) return "drywall_repair";
+    if (system.includes("appliance") || system.includes("dishwasher") || system.includes("oven") || system.includes("range")) return "appliance_repair";
+    if (system.includes("garage")) return "garage_repair";
+    if (system.includes("insulation") || system.includes("attic") || system.includes("crawl")) return "insulation_repair";
 
     return "general_repair";
 }
@@ -1335,6 +1413,9 @@ function generateEstimatePdf(estimate, res) {
             ? estimate.location.addressLine
             : "Address pending";
     const cityStateZip = formatCityStateZip(estimate.location || {});
+    const reportLabel = estimate.reportId ? `Report ID: ${estimate.reportId}` : "Report ID: Not provided";
+    const reportNameLabel = estimate.reportName ? `Report: ${estimate.reportName}` : "Report: Not provided";
+    const propertyTypeLabel = `Property Type: ${estimate.propertyType || "Single Family"}`;
 
     const contentX = centeredLeft;
     doc.fontSize(11).text("Property Details", contentX, doc.y, { width: contentWidth });
@@ -1342,6 +1423,9 @@ function generateEstimatePdf(estimate, res) {
     if (cityStateZip) {
         doc.fontSize(10).text(cityStateZip, contentX, doc.y, { width: contentWidth });
     }
+    doc.fontSize(10).text(propertyTypeLabel, contentX, doc.y, { width: contentWidth });
+    doc.fontSize(10).text(reportLabel, contentX, doc.y, { width: contentWidth });
+    doc.fontSize(10).text(reportNameLabel, contentX, doc.y, { width: contentWidth });
     doc.moveDown(0.5);
 
     renderPdfSection(doc, "Critical Repairs", estimate.criticalItems || [], {
@@ -1399,6 +1483,15 @@ function generateEstimatePdf(estimate, res) {
         doc.moveDown();
         doc.fontSize(11).text("Report Findings", contentX, doc.y, { width: contentWidth });
         doc.fontSize(9).text(estimate.analysis.summary, contentX, doc.y, { width: contentWidth });
+    }
+
+    if (Array.isArray(estimate.assumptions) && estimate.assumptions.length > 0) {
+        doc.moveDown();
+        doc.fontSize(11).text("Assumptions", contentX, doc.y, { width: contentWidth });
+        doc.fontSize(9);
+        estimate.assumptions.forEach((line) => {
+            doc.text(`- ${line}`, contentX, doc.y, { width: contentWidth });
+        });
     }
 
     doc.end();

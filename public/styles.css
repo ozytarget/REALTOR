@@ -243,57 +243,6 @@ h1 {
     box-shadow: var(--shadow);
 }
 
-.company-card {
-    background: var(--panel-strong);
-    border: 1px solid var(--border);
-    border-radius: 24px;
-    padding: 24px;
-    box-shadow: var(--shadow);
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-}
-
-.company-card dl {
-    display: grid;
-    gap: 12px;
-}
-
-.company-card div {
-    display: grid;
-    gap: 4px;
-}
-
-.company-card dt {
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--muted);
-}
-
-.company-card dd {
-    font-weight: 700;
-}
-
-.logo-note {
-    background: rgba(243, 181, 63, 0.14);
-    border-radius: 16px;
-    padding: 16px;
-    display: grid;
-    gap: 8px;
-    font-size: 13px;
-}
-
-.logo-placeholder {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 8px 12px;
-    border-radius: 10px;
-    background: #fff;
-    border: 1px dashed var(--accent);
-    font-weight: 700;
-}
 
 main {
     display: grid;
@@ -361,7 +310,7 @@ main {
     overflow-wrap: anywhere;
 }
 
-.report-item > div {
+.report-item>div {
     min-width: 0;
 }
 
@@ -446,32 +395,6 @@ main {
     background: #fff;
 }
 
-.field-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 12px;
-}
-
-.pill-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-}
-
-.pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    background: rgba(12, 60, 120, 0.08);
-    border-radius: 999px;
-    font-size: 13px;
-    cursor: pointer;
-}
-
-.pill input {
-    accent-color: var(--primary);
-}
 
 .estimate-output {
     background: #fff;
@@ -575,11 +498,6 @@ main {
     font-weight: 600;
 }
 
-.output-actions {
-    display: flex;
-    justify-content: flex-end;
-}
-
 .output-header {
     display: flex;
     align-items: center;
@@ -589,7 +507,7 @@ main {
     overflow-wrap: anywhere;
 }
 
-.output-header > div {
+.output-header>div {
     min-width: 0;
 }
 
@@ -601,7 +519,7 @@ main {
     overflow-wrap: anywhere;
 }
 
-.line-item > div {
+.line-item>div {
     min-width: 0;
 }
 
@@ -726,7 +644,4 @@ main {
         height: auto;
     }
 
-    .edit-row {
-        grid-template-columns: 1fr;
-    }
 }
